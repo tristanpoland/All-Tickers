@@ -1,6 +1,6 @@
 plain and simple, its going to check every ticker from A to ZZZZ to see if its active or not, producing a json list you can use for other projects.
 
-Run
+**Run**
 -npm i
 -node index.js
 
