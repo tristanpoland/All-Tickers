@@ -1,0 +1,19 @@
+plain and simple, its going to check every ticker from A to ZZZZ to see if its active or not, producing a json list you can use for other projects.
+
+Run
+-npm i
+-node index.js
+
+expected output:
+  -output/
+        -active_tickers.json   -> {["A","B"]}
+        -delisted_tickers.json  -> {["EDMM","EDMD"]}
+        -checkpoint.json        -> {"currentIndex": 1,"total": 1,"processed": 1,"activeTickers": 1,"delistedTickers": 1,"timestamp": "2025-08-31T16:51:39.967Z","lastProcessedTicker": "a"}
+        -tickers_status.txt -> "A:Active","B:Active"
+
+To start over, simply remove the output/ directory and all its contents.
+
+(
+  note this takes a long time and progress will be kept via the checkpoint very 10 tickers it checks. 
+  So don't worry about doing it all in one run. And yes multi threading is something that will speed this up, however you will run face first into rate limiting issues with the API. So going manually through the tickers and checking their status one by one is the most reliable method.
+)
