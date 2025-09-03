@@ -8,6 +8,7 @@ const ACTIVE_TICKERS_FILE = path.join(OUTPUT_DIR, 'active_tickers.json');
 const DELISTED_TICKERS_FILE = path.join(OUTPUT_DIR, 'delisted_tickers.json');
 const STATUS_FILE = path.join(OUTPUT_DIR, 'tickers_status.txt');
 const CHECKPOINT_FILE = path.join(OUTPUT_DIR, 'checkpoint.json');
+const ERROR_TICKERS_FILE = path.join(OUTPUT_DIR, 'error_tickers.json');
 
 // Create output directory if it doesn't exist
 if (!fs.existsSync(OUTPUT_DIR)) {
@@ -17,15 +18,24 @@ if (!fs.existsSync(OUTPUT_DIR)) {
 // Generate ticker symbol from index
 function generateTicker(index) {
   const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
-  let result = '';
-  let num = index;
-  
-  do {
-    result = letters[num % 26] + result;
-    num = Math.floor(num / 26);
-  } while (num > 0);
-  
-  return result;
+  // Calculate the ranges for each length
+  const ranges = [26, 26*26, 26*26*26, 26*26*26*26];
+  let remaining = index;
+  for (let len = 1; len <= 4; len++) {
+    const count = Math.pow(26, len);
+    if (remaining < count) {
+      // Generate ticker of length 'len'
+      let result = '';
+      for (let i = 0; i < len; i++) {
+        result = letters[remaining % 26] + result;
+        remaining = Math.floor(remaining / 26);
+      }
+      return result;
+    }
+    remaining -= count;
+  }
+  // If index is out of range, return empty string
+  return '';
 }
 
 // Calculate total possible tickers (A through ZZZZ, optionally ZZZZZ)
@@ -80,7 +90,8 @@ function saveCheckpoint(currentIndex, total, processed, activeTickers, delistedT
 function loadExistingData() {
   let activeTickers = [];
   let delistedTickers = [];
-  
+  let errorTickers = [];
+
   // Load active tickers if file exists
   if (fs.existsSync(ACTIVE_TICKERS_FILE)) {
     try {
@@ -91,7 +102,7 @@ function loadExistingData() {
       console.error('❌ Error loading active tickers:', error.message);
     }
   }
-  
+
   // Load delisted tickers if file exists
   if (fs.existsSync(DELISTED_TICKERS_FILE)) {
     try {
@@ -102,8 +113,19 @@ function loadExistingData() {
       console.error('❌ Error loading delisted tickers:', error.message);
     }
   }
-  
-  return { activeTickers, delistedTickers };
+
+  // Load error tickers if file exists
+  if (fs.existsSync(ERROR_TICKERS_FILE)) {
+    try {
+      const data = fs.readFileSync(ERROR_TICKERS_FILE, 'utf8');
+      errorTickers = JSON.parse(data);
+      console.log(`⚠️ Loaded ${errorTickers.length} error tickers`);
+    } catch (error) {
+      console.error('❌ Error loading error tickers:', error.message);
+    }
+  }
+
+  return { activeTickers, delistedTickers, errorTickers };
 }
 
 // Pause helper
@@ -113,23 +135,53 @@ function sleep(ms) {
 
 // Check if ticker is active using Yahoo Finance API
 async function checkTicker(ticker) {
-  try {
-    const quote = await yahooFinance.quote(ticker);
-    
-    if (quote?.symbol) {
-      return {
-        isActive: true,
-        symbol: quote.symbol,
-        price: quote.regularMarketPrice || 0,
-        currency: quote.currency || 'USD',
-        exchange: quote.fullExchangeName || 'Unknown'
-      };
+  let validationError = null;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const quote = await yahooFinance.quote(ticker);
+      if (quote?.symbol) {
+        return {
+          isActive: true,
+          symbol: quote.symbol,
+          price: quote.regularMarketPrice || 0,
+          currency: quote.currency || 'USD',
+          exchange: quote.fullExchangeName || 'Unknown'
+        };
+      }
+      return { isActive: false };
+    } catch (error) {
+      if (error && error.message && error.message.includes('Expected union value')) {
+        validationError = error;
+        console.error(`❌ Validation error for symbol '${ticker}' (attempt ${attempt}): ${error.message}`);
+        await sleep(500); // Wait before retrying
+      } else {
+        throw error; // Non-validation error, let main loop handle
+      }
     }
-    
-    return { isActive: false };
-  } catch (error) {
-    // Yahoo Finance throws error for invalid/delisted tickers
-    return { isActive: false };
+  }
+  // After 3 failed validation attempts, log to error_tickers.json
+  if (validationError) {
+    addErrorTicker(ticker, validationError.message);
+  }
+  return { isActive: false };
+}
+
+// Add ticker to error_tickers.json
+function addErrorTicker(ticker, message) {
+  let errorTickers = [];
+  if (fs.existsSync(ERROR_TICKERS_FILE)) {
+    try {
+      errorTickers = JSON.parse(fs.readFileSync(ERROR_TICKERS_FILE, 'utf8'));
+    } catch (e) {
+      errorTickers = [];
+    }
+  }
+  errorTickers.push({ ticker, message, timestamp: new Date().toISOString() });
+  try {
+    fs.writeFileSync(ERROR_TICKERS_FILE, JSON.stringify(errorTickers, null, 2));
+    console.log(`⚠️ Added ${ticker} to error_tickers.json`);
+  } catch (e) {
+    console.error('❌ Error saving error_tickers.json:', e.message);
   }
 }
 
@@ -166,7 +218,7 @@ async function main() {
   
   // Load checkpoint and existing data
   const checkpoint = loadCheckpoint();
-  const { activeTickers, delistedTickers } = loadExistingData();
+  const { activeTickers, delistedTickers, errorTickers } = loadExistingData();
   
   // Calculate total and starting point
   const totalTickers = calculateTotalTickers();
@@ -213,54 +265,104 @@ async function main() {
   
   for (let i = startIndex; i < totalTickers; i++) {
     const ticker = generateTicker(i);
-    
-    try {
-      // Check if ticker already exists in our data
-      const alreadyProcessed = activeTickers.includes(ticker) || delistedTickers.includes(ticker);
-      
-      if (alreadyProcessed) {
-        console.log(`⏭️  Skipping ${ticker} (already processed)`);
-        // Don't increment processed count for skipped items
-        continue;
+    // Check if ticker already exists in our data
+    const alreadyProcessed = activeTickers.includes(ticker) || delistedTickers.includes(ticker);
+    if (alreadyProcessed) {
+      console.log(`⏭️  Skipping ${ticker} (already processed)`);
+      continue;
+    }
+
+    let result = null;
+    let attempt = 0;
+    const maxRetries = 3;
+    let lastError = null;
+    while (attempt < maxRetries) {
+      try {
+        result = await checkTicker(ticker);
+        break; // Success, exit retry loop
+      } catch (error) {
+        lastError = error;
+        attempt++;
+        console.error(`❌ Error checking ${ticker} (attempt ${attempt}): ${error.message}`);
+        await sleep(500); // Wait before retrying
       }
-      
-      const result = await checkTicker(ticker);
-      
-      if (result.isActive) {
-        activeTickers.push(ticker);
-        updateStatus(i + 1, totalTickers, activeTickers, delistedTickers, ticker, true);
-      } else {
-        delistedTickers.push(ticker);
-        updateStatus(i + 1, totalTickers, activeTickers, delistedTickers, ticker, false);
-      }
-      
-      processed++;
-      consecutiveErrors = 0;
-      
-      // Save progress every 10 tickers
-      if (processed % 10 === 0) {
-        saveData(activeTickers, delistedTickers);
-        saveCheckpoint(i + 1, totalTickers, processed, activeTickers, delistedTickers);
-      }
-      
-      // Rate limiting - wait 100ms between requests
-      await sleep(100);
-      
-    } catch (error) {
+    }
+
+    if (!result) {
       consecutiveErrors++;
-      console.error(`❌ Error checking ${ticker}: ${error.message}`);
-      
+      console.error(`❌ Failed to process ${ticker} after ${maxRetries} attempts: ${lastError ? lastError.message : 'Unknown error'}`);
+      // Log Yahoo schema validation errors to error_tickers.json
+      if (lastError && lastError.message && (
+        lastError.message.includes('Expected union value') ||
+        lastError.message.includes('Failed Yahoo Schema validation')
+      )) {
+        addErrorTicker(ticker, lastError.message);
+      }
       if (consecutiveErrors >= maxConsecutiveErrors) {
-        console.error(`🛑 Too many consecutive errors (${maxConsecutiveErrors}). Stopping.`);
-        // Save progress before stopping
+        console.error(`🛑 Too many consecutive errors (${maxConsecutiveErrors}). Pausing for 60 seconds and retrying previous 10 tickers.`);
         saveData(activeTickers, delistedTickers);
         saveCheckpoint(i, totalTickers, processed, activeTickers, delistedTickers);
-        break;
+        await sleep(60000); // Pause for 60 seconds
+        // Retry previous 10 tickers
+        const retryStart = Math.max(i - 10, 0);
+        for (let retryIdx = retryStart; retryIdx < i; retryIdx++) {
+          const retryTicker = generateTicker(retryIdx);
+          if (activeTickers.includes(retryTicker) || delistedTickers.includes(retryTicker)) continue;
+          let retryResult = null;
+          let retryAttempt = 0;
+          let retryLastError = null;
+          while (retryAttempt < maxRetries) {
+            try {
+              retryResult = await checkTicker(retryTicker);
+              break;
+            } catch (error) {
+              retryAttempt++;
+              retryLastError = error;
+              console.error(`❌ Retry error for ${retryTicker} (attempt ${retryAttempt}): ${error.message}`);
+              await sleep(500);
+            }
+          }
+          if (!retryResult && retryLastError && retryLastError.message && (
+            retryLastError.message.includes('Expected union value') ||
+            retryLastError.message.includes('Failed Yahoo Schema validation')
+          )) {
+            addErrorTicker(retryTicker, retryLastError.message);
+          }
+          if (retryResult && retryResult.isActive) {
+            activeTickers.push(retryTicker);
+            updateStatus(retryIdx + 1, totalTickers, activeTickers, delistedTickers, retryTicker, true);
+          } else if (retryResult) {
+            delistedTickers.push(retryTicker);
+            updateStatus(retryIdx + 1, totalTickers, activeTickers, delistedTickers, retryTicker, false);
+          }
+        }
+        consecutiveErrors = 0;
+        continue;
       }
+      await sleep(0);
       
-      // Wait longer after errors
-      await sleep(1000);
+      continue;
     }
+
+    if (result.isActive) {
+      activeTickers.push(ticker);
+      updateStatus(i + 1, totalTickers, activeTickers, delistedTickers, ticker, true);
+    } else {
+      delistedTickers.push(ticker);
+      updateStatus(i + 1, totalTickers, activeTickers, delistedTickers, ticker, false);
+    }
+
+    processed++;
+    consecutiveErrors = 0;
+
+    // Save progress every 10 tickers
+    if (processed % 10 === 0) {
+      saveData(activeTickers, delistedTickers);
+      saveCheckpoint(i + 1, totalTickers, processed, activeTickers, delistedTickers);
+    }
+
+    // Rate limiting - wait 100ms between requests
+    await sleep(0);
   }
   
   // Final save
