@@ -153,7 +153,7 @@ async function checkTicker(ticker) {
       if (error && error.message && error.message.includes('Expected union value')) {
         validationError = error;
         console.error(`❌ Validation error for symbol '${ticker}' (attempt ${attempt}): ${error.message}`);
-        await sleep(500); // Wait before retrying
+        // No delay
       } else {
         throw error; // Non-validation error, let main loop handle
       }
@@ -284,7 +284,7 @@ async function main() {
         lastError = error;
         attempt++;
         console.error(`❌ Error checking ${ticker} (attempt ${attempt}): ${error.message}`);
-        await sleep(500); // Wait before retrying
+        // No delay
       }
     }
 
@@ -302,7 +302,7 @@ async function main() {
         console.error(`🛑 Too many consecutive errors (${maxConsecutiveErrors}). Pausing for 60 seconds and retrying previous 10 tickers.`);
         saveData(activeTickers, delistedTickers);
         saveCheckpoint(i, totalTickers, processed, activeTickers, delistedTickers);
-        await sleep(60000); // Pause for 60 seconds
+  // No delay
         // Retry previous 10 tickers
         const retryStart = Math.max(i - 10, 0);
         for (let retryIdx = retryStart; retryIdx < i; retryIdx++) {
@@ -319,7 +319,7 @@ async function main() {
               retryAttempt++;
               retryLastError = error;
               console.error(`❌ Retry error for ${retryTicker} (attempt ${retryAttempt}): ${error.message}`);
-              await sleep(500);
+              // No delay
             }
           }
           if (!retryResult && retryLastError && retryLastError.message && (
@@ -339,8 +339,8 @@ async function main() {
         consecutiveErrors = 0;
         continue;
       }
-      await sleep(0);
-      
+  // No delay
+
       continue;
     }
 
@@ -362,7 +362,7 @@ async function main() {
     }
 
     // Rate limiting - wait 100ms between requests
-    await sleep(0);
+  // No delay
   }
   
   // Final save
