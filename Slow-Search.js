@@ -18,6 +18,12 @@ const CHECKPOINT_FILE = path.join(OUTPUT_DIR, 'checkpoint.json');
 // Initialize database
 const db = new TickerDatabase();
 
+// Timing configuration for 15-minute breaks
+let startTime = Date.now();
+let lastPauseTime = Date.now();
+const PAUSE_INTERVAL = 15 * 60 * 1000; // 15 minutes in milliseconds
+const PAUSE_DURATION = 1 * 60 * 1000; // 1 minute in milliseconds
+
 // Create output directory if it doesn't exist
 if (!fs.existsSync(OUTPUT_DIR)) {
   fs.mkdirSync(OUTPUT_DIR, { recursive: true });
@@ -112,29 +118,44 @@ function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-// Check if ticker is active using Yahoo Finance API
+// Check if ticker is active using Yahoo Finance API (same logic as validation scripts)
 async function checkTicker(ticker) {
   try {
     const quote = await yahooFinance.quote(ticker);
     
     if (quote?.symbol) {
-      return {
-        isActive: true,
-        symbol: quote.symbol,
-        price: quote.regularMarketPrice || 0,
-        currency: quote.currency || 'USD',
-        exchange: quote.fullExchangeName || 'Unknown'
-      };
+      const exch = quote.fullExchangeName || quote.exchange || "";
+      const isUS = exch.includes("NYSE") || exch.includes("Nasdaq") || exch.includes("AMEX");
+      
+      if (isUS && quote.regularMarketPrice != null) {
+        return {
+          isActive: true,
+          symbol: quote.symbol,
+          price: quote.regularMarketPrice,
+          currency: quote.currency || 'USD',
+          exchange: exch
+        };
+      } else if (isUS) {
+        // US ticker but no price - delisted
+        return {
+          isActive: false,
+          symbol: quote.symbol,
+          price: null,
+          currency: quote.currency || 'USD',
+          exchange: exch
+        };
+      }
+      // Non-US ticker - invalid
+      return { isActive: false, exchange: exch };
     }
     
     return { isActive: false };
   } catch (error) {
-    // Silently treat Yahoo Schema validation errors as delisted (don't spam console)
-    if (error.constructor.name === 'FailedYahooValidationError' ||
-        (error && error.message && (
-          error.message.includes('Expected union value') ||
-          error.message.includes('Failed Yahoo Schema validation')
-        ))) {
+    // Silently treat Yahoo Schema validation errors as delisted
+    if (error && error.message && (
+      error.message.includes('Expected union value') ||
+      error.message.includes('Failed Yahoo Schema validation')
+    )) {
       return { isActive: false };
     }
     // Yahoo Finance throws error for invalid/delisted tickers
@@ -220,6 +241,22 @@ async function main() {
   for (let i = startIndex; i < totalTickers; i++) {
     const ticker = generateTicker(i);
     
+    // Check if it's time for a 15-minute pause
+    const currentTime = Date.now();
+    if (currentTime - lastPauseTime >= PAUSE_INTERVAL) {
+      const elapsedMinutes = Math.round((currentTime - startTime) / 1000 / 60);
+      const currentStats = await db.getStats();
+      
+      console.log(`\n⏸️  Taking 1-minute break after ${elapsedMinutes} minutes of processing...`);
+      console.log(`📊 Progress: ${processed}/${totalTickers} (${((processed/totalTickers)*100).toFixed(1)}%)`);
+      console.log(`✅ Active: ${currentStats.active || 0} | ❌ Delisted: ${currentStats.delisted || 0}`);
+      
+      await sleep(PAUSE_DURATION);
+      lastPauseTime = Date.now();
+      
+      console.log(`▶️  Resuming ticker validation...\n`);
+    }
+    
     try {
       // Check if ticker already exists in database
       const activeTickers = await db.getTickersByStatus('active');
@@ -239,12 +276,14 @@ async function main() {
           price: result.price,
           exchange: result.exchange
         });
+        console.log(`💾 ${ticker} → active (${result.exchange})`);
         const updatedStats = await db.getStats();
         updateStatus(i + 1, totalTickers, updatedStats.active, updatedStats.delisted, ticker, true);
       } else {
         await db.upsertTicker(ticker, 'delisted', {
-          exchange: result.exchange
+          exchange: result.exchange || 'Unknown'
         });
+        console.log(`💾 ${ticker} → delisted (${result.exchange || 'Unknown'})`);
         const updatedStats = await db.getStats();
         updateStatus(i + 1, totalTickers, updatedStats.active, updatedStats.delisted, ticker, false);
       }
@@ -259,8 +298,8 @@ async function main() {
         saveCheckpoint(i + 1, totalTickers, processed, currentStats.active, currentStats.delisted);
       }
 
-      // Rate limiting - wait 100ms between requests
-      await sleep(100);
+      // Rate limiting - wait 1.5 seconds between requests
+      await sleep(1500);
       
     } catch (error) {
       consecutiveErrors++;
