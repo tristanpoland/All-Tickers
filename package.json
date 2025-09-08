@@ -1,16 +1,26 @@
 {
-  "name": "ahh",
+  "name": "all-tickers",
   "version": "1.0.0",
-  "main": "index.js",
+  "main": "index-db.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "setup": "mkdir -p output && echo 'Output directory created. Run npm run init to initialize database.'",
+    "init": "node index-db.js",
+    "validate-active": "node validate-active.js",
+    "validate-delisted": "node validate-delisted.js",
+    "search": "node Slow-Search.js",
+    "export": "node export-to-json.js",
+    "update-master": "node update-master-list.js",
+    "manual": "node Manual-Validate.js",
+    "test": "node --check ticker-database.js && node --check validate-active.js && node --check validate-delisted.js && echo 'All syntax checks passed!'"
   },
   "type": "module",
-  "keywords": [],
+  "keywords": ["ticker", "validation", "yahoo-finance", "sqlite", "database"],
   "author": "",
   "license": "ISC",
   "description": "",
   "dependencies": {
-        "yahoo-finance2": "^2.13.3"
+    "sqlite": "^5.1.1",
+    "sqlite3": "^5.1.7",
+    "yahoo-finance2": "^2.13.3"
   }
 }
