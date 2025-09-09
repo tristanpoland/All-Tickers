@@ -1,26 +1,19 @@
 {
-  "name": "all-tickers",
-  "version": "1.0.0",
-  "main": "index-db.js",
+  "name": "all-tickers-bulk",
+  "version": "2.0.0",
+  "description": "Bulk ticker generation and validation system with SQLite database",
+  "main": "index.js",
   "scripts": {
-    "setup": "mkdir -p output && echo 'Output directory created. Run npm run init to initialize database.'",
-    "init": "node index-db.js",
-    "validate-active": "node validate-active.js",
-    "validate-delisted": "node validate-delisted.js",
-    "search": "node Slow-Search.js",
-    "export": "node export-to-json.js",
-    "update-master": "node update-master-list.js",
-    "manual": "node Manual-Validate.js",
-    "test": "node --check ticker-database.js && node --check validate-active.js && node --check validate-delisted.js && echo 'All syntax checks passed!'"
+    "generate": "node generate-tickers.js",
+    "validate": "node validate-tickers.js",
+    "validate-fast": "node validate-tickers-fast.js",
+    "export": "node export-results.js"
   },
-  "type": "module",
-  "keywords": ["ticker", "validation", "yahoo-finance", "sqlite", "database"],
-  "author": "",
-  "license": "ISC",
-  "description": "",
   "dependencies": {
-    "sqlite": "^5.1.1",
-    "sqlite3": "^5.1.7",
-    "yahoo-finance2": "^2.13.3"
-  }
+    "sqlite3": "^5.1.6",
+    "axios": "^1.6.0"
+  },
+  "keywords": ["tickers", "stock", "validation", "bulk"],
+  "author": "All-Tickers",
+  "license": "MIT"
 }
