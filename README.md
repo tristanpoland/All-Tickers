@@ -58,7 +58,7 @@ Results are saved in the `output/` directory:
 - **Real-time Data**: Yahoo Finance API for current prices and exchanges
 - **Resumable**: Process can be stopped and restarted anytime
 - **Fast**: Batch processing with rate limiting
-- **Organized Output**: Clean JSON files with metadata
+- **Organized Output**: Clean JSON files with simple metadata
 
 Expected results: ~3% active tickers (16K-17K stocks), 2-4 hours processing time.
 
