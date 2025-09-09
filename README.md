@@ -42,6 +42,10 @@ npm run generate            # Generate ticker combinations
 npm run validate            # Validate against APIs
 npm run export              # Export to JSON files
 
+# Specialized exports
+node src/export-advanced/export-nyse-results.js    # Export NYSE tickers only
+node src/export-advanced/export-nyse-results.js --preview    # Preview NYSE data
+
 # Quick preview
 npm run export:preview      # Show current statistics
 ```
@@ -49,8 +53,14 @@ npm run export:preview      # Show current statistics
 ## Output
 
 Results are saved in the `output/` directory:
-- `active_tickers.json` - Active stocks with price data
+
+**Standard Results:**
+- `active_tickers.json` - Active stocks with price data  
 - `delisted_tickers.json` - Inactive/delisted stocks
+
+**Specialized Exports:**
+- `nyse_tickers.json` - NYSE/NASDAQ tickers only (3,842 tickers)
+- `nyse_tickers.csv` - NYSE tickers in spreadsheet format
 
 ## Features
 
