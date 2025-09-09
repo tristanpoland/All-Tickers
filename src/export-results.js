@@ -284,13 +284,21 @@ class ResultsExporter {
 
     // Close database connection
     close() {
-        this.db.close((err) => {
-            if (err) {
-                console.error('❌ Error closing database:', err);
-            } else {
-                console.log('✅ Database connection closed');
-            }
-        });
+        if (!this.db) return; // Already closed
+        
+        try {
+            this.db.close((err) => {
+                if (err) {
+                    console.error('❌ Error closing database:', err);
+                } else {
+                    console.log('✅ Database connection closed');
+                }
+            });
+            this.db = null; // Mark as closed
+        } catch (error) {
+            // Database already closed or connection lost
+            this.db = null;
+        }
     }
 }
 
