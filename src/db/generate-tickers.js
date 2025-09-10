@@ -41,32 +41,45 @@ class TickerGenerator {
             tickers.push(alphabet[i]);
         }
 
-        // Generate 2-letter tickers (AA-ZZ)
-        for (let i = 0; i < alphabet.length; i++) {
-            for (let j = 0; j < alphabet.length; j++) {
-                tickers.push(alphabet[i] + alphabet[j]);
-            }
-        }
+        // // Generate 2-letter tickers (AA-ZZ)
+        // for (let i = 0; i < alphabet.length; i++) {
+        //     for (let j = 0; j < alphabet.length; j++) {
+        //         tickers.push(alphabet[i] + alphabet[j]);
+        //     }
+        // }
 
-        // Generate 3-letter tickers (AAA-ZZZ)
-        for (let i = 0; i < alphabet.length; i++) {
-            for (let j = 0; j < alphabet.length; j++) {
-                for (let k = 0; k < alphabet.length; k++) {
-                    tickers.push(alphabet[i] + alphabet[j] + alphabet[k]);
-                }
-            }
-        }
+        // // Generate 3-letter tickers (AAA-ZZZ)
+        // for (let i = 0; i < alphabet.length; i++) {
+        //     for (let j = 0; j < alphabet.length; j++) {
+        //         for (let k = 0; k < alphabet.length; k++) {
+        //             tickers.push(alphabet[i] + alphabet[j] + alphabet[k]);
+        //         }
+        //     }
+        // }
 
-        // Generate 4-letter tickers (AAAA-ZZZZ)
-        for (let i = 0; i < alphabet.length; i++) {
-            for (let j = 0; j < alphabet.length; j++) {
-                for (let k = 0; k < alphabet.length; k++) {
-                    for (let l = 0; l < alphabet.length; l++) {
-                        tickers.push(alphabet[i] + alphabet[j] + alphabet[k] + alphabet[l]);
-                    }
-                }
-            }
-        }
+        // // Generate 4-letter tickers (AAAA-ZZZZ)
+        // for (let i = 0; i < alphabet.length; i++) {
+        //     for (let j = 0; j < alphabet.length; j++) {
+        //         for (let k = 0; k < alphabet.length; k++) {
+        //             for (let l = 0; l < alphabet.length; l++) {
+        //                 tickers.push(alphabet[i] + alphabet[j] + alphabet[k] + alphabet[l]);
+        //             }
+        //         }
+        //     }
+        // }
+
+        // // Generate 5-letter tickers (AAAAA-ZZZZZ)
+        // for (let i = 0; i < alphabet.length; i++) {
+        //     for (let j = 0; j < alphabet.length; j++) {
+        //         for (let k = 0; k < alphabet.length; k++) {
+        //             for (let l = 0; l < alphabet.length; l++) {
+        //                 for (let m = 0; m < alphabet.length; m++) {
+        //                     tickers.push(alphabet[i] + alphabet[j] + alphabet[k] + alphabet[l] + alphabet[m]);
+        //                 }
+        //             }
+        //         }
+        //     }
+        // }
 
         return tickers;
     }
@@ -206,6 +219,7 @@ async function main() {
         console.log(`   • 2-letter: 676 tickers (AA-ZZ)`);
         console.log(`   • 3-letter: 17,576 tickers (AAA-ZZZ)`);
         console.log(`   • 4-letter: 456,976 tickers (AAAA-ZZZZ)`);
+        console.log(`   • 5-letter: 11,881,376 tickers (AAAAA-ZZZZZ)`);
         
         // Insert tickers into database
         const insertStartTime = Date.now();
