@@ -72,17 +72,17 @@ class TickerGenerator {
         // the 5-letter ticker generation is commented out for now to prevent excessive API calls, it is anticipated that it will take 100+ hours to complete validation of all 1-5 letter tickers alone which is way beyond the scopt, so i may need to figure out a way to batch the tickers and have a checkpoint system to resume where it left off.
        
         // Generate 5-letter tickers (AAAAA-ZZZZZ)
-        // for (let i = 0; i < alphabet.length; i++) {
-        //     for (let j = 0; j < alphabet.length; j++) {
-        //         for (let k = 0; k < alphabet.length; k++) {
-        //             for (let l = 0; l < alphabet.length; l++) {
-        //                 for (let m = 0; m < alphabet.length; m++) {
-        //                     tickers.push(alphabet[i] + alphabet[j] + alphabet[k] + alphabet[l] + alphabet[m]);
-        //                 }
-        //             }
-        //         }
-        //     }
-        // }
+        for (let i = 0; i < alphabet.length; i++) {
+            for (let j = 0; j < alphabet.length; j++) {
+                for (let k = 0; k < alphabet.length; k++) {
+                    for (let l = 0; l < alphabet.length; l++) {
+                        for (let m = 0; m < alphabet.length; m++) {
+                            tickers.push(alphabet[i] + alphabet[j] + alphabet[k] + alphabet[l] + alphabet[m]);
+                        }
+                    }
+                }
+            }
+        }
 
         return tickers;
     }
