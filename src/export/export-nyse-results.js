@@ -4,8 +4,12 @@ const path = require('path');
 
 class NYSEResultsExporter {
     constructor() {
-        this.dbPath = path.join(__dirname, '..', 'Initial Search', 'tickers.db');
+        // NYSE exchanges we want to include
+        this.nyseExchanges = ['NYQ', 'NMS', 'NYSE Arca', 'BATS'];
+        this.dbPath = path.join(__dirname, '..', 'db', 'tickers.db');
         this.db = new sqlite3.Database(this.dbPath);
+        
+        // Output paths
         this.outputDir = path.join(__dirname, '..', '..', 'output');
         this.nyseTickersPath = path.join(this.outputDir, 'nyse_tickers.json');
         this.nyseTickersCSVPath = path.join(this.outputDir, 'nyse_tickers.csv');
@@ -14,15 +18,6 @@ class NYSEResultsExporter {
         if (!fs.existsSync(this.outputDir)) {
             fs.mkdirSync(this.outputDir, { recursive: true });
         }
-
-        // NYSE exchange identifiers
-        this.nyseExchanges = [
-            'NYQ',      // NYSE (New York Stock Exchange)
-            'NYSE',     // Alternative NYSE identifier
-            'NMS',      // NASDAQ National Market System (often grouped with NYSE)
-            'NYSEArca', // NYSE Arca
-            'BATS',     // Cboe BZX Exchange (major US exchange)
-        ];
     }
 
     // Get only NYSE tickers

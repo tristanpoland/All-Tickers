@@ -1,26 +1,26 @@
 #!/usr/bin/env node
-// Re-validate inactive tickers to check for missed active ones
+// Re-validate active tickers to check if any have become inactive
 
 const sqlite3 = require('sqlite3').verbose();
 const axios = require('axios');
 const path = require('path');
 
-class InactiveTickerRevalidator {
+class ActiveTickerRevalidator {
     constructor() {
-        this.dbPath = path.join(__dirname, 'tickers.db');
+        this.dbPath = path.join(__dirname, '..', 'db', 'tickers.db');
         this.db = new sqlite3.Database(this.dbPath);
-        this.concurrentRequests = 10; // Lower concurrency for re-validation
+        this.concurrentRequests = 8; // Conservative concurrency for active ticker validation
         this.batchSize = 500;
-        this.retryDelay = 500; // 500ms between batches
+        this.retryDelay = 750; // 750ms between batches
     }
 
-    // Get all inactive tickers from database
-    async getInactiveTickers() {
+    // Get all active tickers from database
+    async getActiveTickers() {
         return new Promise((resolve, reject) => {
             const query = `
-                SELECT ticker 
+                SELECT ticker, price, exchange
                 FROM tickers 
-                WHERE active = 0 OR active IS NULL
+                WHERE active = 1
                 ORDER BY ticker
             `;
             
@@ -28,7 +28,7 @@ class InactiveTickerRevalidator {
                 if (err) {
                     reject(err);
                 } else {
-                    resolve(rows.map(row => row.ticker));
+                    resolve(rows);
                 }
             });
         });
@@ -39,7 +39,7 @@ class InactiveTickerRevalidator {
         try {
             const url = `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}`;
             const response = await axios.get(url, {
-                timeout: 5000,
+                timeout: 7000,
                 headers: {
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
                 }
@@ -59,17 +59,26 @@ class InactiveTickerRevalidator {
                 }
             }
             
-            return { active: false, price: -1, exchange: 'INACTIVE' };
+            return { active: false, price: -1, exchange: 'DELISTED' };
             
         } catch (error) {
+            // Network errors or 404s might indicate delisted tickers
+            if (error.response && error.response.status === 404) {
+                return { active: false, price: -1, exchange: 'NOT_FOUND' };
+            }
             return { active: false, price: -1, exchange: 'ERROR' };
         }
     }
 
     // Validate multiple tickers concurrently
     async validateTickersConcurrent(tickers) {
-        const promises = tickers.map(ticker => 
-            this.validateTicker(ticker).then(result => ({ ticker, ...result }))
+        const promises = tickers.map(tickerInfo => 
+            this.validateTicker(tickerInfo.ticker).then(result => ({ 
+                ticker: tickerInfo.ticker,
+                oldPrice: tickerInfo.price,
+                oldExchange: tickerInfo.exchange,
+                ...result 
+            }))
         );
         
         const results = await Promise.allSettled(promises);
@@ -82,7 +91,9 @@ class InactiveTickerRevalidator {
                     ticker: 'UNKNOWN',
                     active: false,
                     price: -1,
-                    exchange: 'ERROR'
+                    exchange: 'ERROR',
+                    oldPrice: -1,
+                    oldExchange: 'UNKNOWN'
                 };
             }
         });
@@ -102,9 +113,10 @@ class InactiveTickerRevalidator {
             
             let completed = 0;
             let errors = 0;
-            let foundActive = 0;
+            let nowInactive = 0;
+            let priceUpdates = 0;
             
-            tickerResults.forEach(({ ticker, active, price, exchange }) => {
+            tickerResults.forEach(({ ticker, active, price, exchange, oldPrice }) => {
                 stmt.run([
                     active ? 1 : 0,
                     price,
@@ -114,8 +126,12 @@ class InactiveTickerRevalidator {
                     if (err) {
                         errors++;
                         console.error(`❌ Error updating ${ticker}:`, err.message);
-                    } else if (active) {
-                        foundActive++;
+                    } else {
+                        if (!active) {
+                            nowInactive++;
+                        } else if (oldPrice !== price) {
+                            priceUpdates++;
+                        }
                     }
                     
                     completed++;
@@ -123,7 +139,7 @@ class InactiveTickerRevalidator {
                     if (completed === tickerResults.length) {
                         this.db.run('COMMIT');
                         stmt.finalize();
-                        resolve({ completed, errors, foundActive });
+                        resolve({ completed, errors, nowInactive, priceUpdates });
                     }
                 });
             });
@@ -131,27 +147,28 @@ class InactiveTickerRevalidator {
     }
 
     // Main revalidation process
-    async revalidateInactiveTickers() {
-        console.log('🔍 Starting revalidation of inactive tickers...\n');
+    async revalidateActiveTickers() {
+        console.log('🔍 Starting revalidation of active tickers...\n');
         
-        // Get all inactive tickers
-        const inactiveTickers = await this.getInactiveTickers();
-        console.log(`📊 Found ${inactiveTickers.length.toLocaleString()} inactive tickers to revalidate\n`);
+        // Get all active tickers
+        const activeTickers = await this.getActiveTickers();
+        console.log(`📊 Found ${activeTickers.length.toLocaleString()} active tickers to revalidate\n`);
         
-        if (inactiveTickers.length === 0) {
-            console.log('✅ No inactive tickers found to revalidate!');
+        if (activeTickers.length === 0) {
+            console.log('✅ No active tickers found to revalidate!');
             return;
         }
         
         let totalProcessed = 0;
-        let totalFoundActive = 0;
+        let totalNowInactive = 0;
+        let totalPriceUpdates = 0;
         let totalErrors = 0;
         
         // Process in batches
-        for (let i = 0; i < inactiveTickers.length; i += this.batchSize) {
-            const batch = inactiveTickers.slice(i, i + this.batchSize);
+        for (let i = 0; i < activeTickers.length; i += this.batchSize) {
+            const batch = activeTickers.slice(i, i + this.batchSize);
             const batchNum = Math.floor(i / this.batchSize) + 1;
-            const totalBatches = Math.ceil(inactiveTickers.length / this.batchSize);
+            const totalBatches = Math.ceil(activeTickers.length / this.batchSize);
             
             console.log(`🚀 Processing batch ${batchNum}/${totalBatches} (${batch.length} tickers)...`);
             
@@ -168,10 +185,14 @@ class InactiveTickerRevalidator {
                 const chunkResults = await this.validateTickersConcurrent(chunk);
                 batchResults.push(...chunkResults);
                 
-                // Show any newly found active tickers
-                chunkResults.forEach(({ ticker, active, price, exchange }) => {
-                    if (active) {
-                        console.log(`✨ Found previously missed ticker: ${ticker} - ${exchange} - $${price}`);
+                // Show any tickers that became inactive or had significant price changes
+                chunkResults.forEach(({ ticker, active, price, exchange, oldPrice, oldExchange }) => {
+                    if (!active) {
+                        console.log(`⚠️  ${ticker} is now inactive: ${oldExchange} → ${exchange}`);
+                    } else if (Math.abs(price - oldPrice) / oldPrice > 0.1) {
+                        // Show significant price changes (>10%)
+                        const change = ((price - oldPrice) / oldPrice * 100).toFixed(1);
+                        console.log(`📈 ${ticker}: $${oldPrice.toFixed(2)} → $${price.toFixed(2)} (${change > 0 ? '+' : ''}${change}%)`);
                     }
                 });
                 
@@ -183,14 +204,15 @@ class InactiveTickerRevalidator {
             try {
                 const updateResults = await this.updateDatabase(batchResults);
                 totalProcessed += updateResults.completed;
-                totalFoundActive += updateResults.foundActive;
+                totalNowInactive += updateResults.nowInactive;
+                totalPriceUpdates += updateResults.priceUpdates;
                 totalErrors += updateResults.errors;
                 
-                console.log(`💾 Batch ${batchNum} completed: ${updateResults.foundActive} new active tickers found`);
+                console.log(`💾 Batch ${batchNum} completed: ${updateResults.nowInactive} became inactive, ${updateResults.priceUpdates} price updates`);
                 
                 // Progress update
-                const progress = ((i + batch.length) / inactiveTickers.length * 100).toFixed(1);
-                console.log(`📈 Progress: ${progress}% (${totalFoundActive} newly active tickers found so far)\n`);
+                const progress = ((i + batch.length) / activeTickers.length * 100).toFixed(1);
+                console.log(`📈 Progress: ${progress}% (${totalNowInactive} now inactive, ${totalPriceUpdates} price updates so far)\n`);
                 
             } catch (error) {
                 console.error('❌ Batch update failed:', error);
@@ -198,24 +220,38 @@ class InactiveTickerRevalidator {
             }
             
             // Longer delay between batches to be respectful to the API
-            if (i + this.batchSize < inactiveTickers.length) {
-                await new Promise(resolve => setTimeout(resolve, 1000));
+            if (i + this.batchSize < activeTickers.length) {
+                await new Promise(resolve => setTimeout(resolve, 1500));
             }
         }
         
         // Final summary
-        console.log('🎉 Revalidation completed!');
+        console.log('🎉 Active ticker revalidation completed!');
         console.log('==========================================');
         console.log(`📊 Total tickers processed: ${totalProcessed.toLocaleString()}`);
-        console.log(`✨ Previously missed active tickers: ${totalFoundActive.toLocaleString()}`);
+        console.log(`⚠️  Tickers now inactive: ${totalNowInactive.toLocaleString()}`);
+        console.log(`📈 Price updates: ${totalPriceUpdates.toLocaleString()}`);
         console.log(`❌ Errors: ${totalErrors.toLocaleString()}`);
         
-        if (totalFoundActive > 0) {
-            console.log(`\n🎯 Success! Found ${totalFoundActive} tickers that were previously marked as inactive`);
+        if (totalNowInactive > 0) {
+            console.log(`\n🔍 Found ${totalNowInactive} tickers that are no longer active`);
             console.log('💡 Consider running export scripts to update your output files');
-        } else {
-            console.log('\n✅ No previously missed active tickers found - validation was accurate!');
         }
+        
+        if (totalPriceUpdates > 0) {
+            console.log(`\n📊 Updated prices for ${totalPriceUpdates} tickers`);
+        }
+        
+        if (totalNowInactive === 0 && totalPriceUpdates === 0) {
+            console.log('\n✅ All active tickers are still active with current prices!');
+        }
+        
+        // Calculate data freshness metrics
+        const inactiveRate = (totalNowInactive / totalProcessed * 100).toFixed(2);
+        const updateRate = (totalPriceUpdates / totalProcessed * 100).toFixed(2);
+        console.log(`\n📊 Data Quality Metrics:`);
+        console.log(`   Inactive rate: ${inactiveRate}%`);
+        console.log(`   Price update rate: ${updateRate}%`);
     }
 
     // Close database connection
@@ -226,12 +262,12 @@ class InactiveTickerRevalidator {
 
 // Main execution
 async function main() {
-    const revalidator = new InactiveTickerRevalidator();
+    const revalidator = new ActiveTickerRevalidator();
     
     try {
-        await revalidator.revalidateInactiveTickers();
+        await revalidator.revalidateActiveTickers();
     } catch (error) {
-        console.error('💥 Revalidation failed:', error);
+        console.error('💥 Active ticker revalidation failed:', error);
         process.exit(1);
     } finally {
         revalidator.close();
@@ -240,7 +276,7 @@ async function main() {
 
 // Handle interruption gracefully
 process.on('SIGINT', () => {
-    console.log('\n🛑 Revalidation interrupted by user');
+    console.log('\n🛑 Active ticker revalidation interrupted by user');
     console.log('💾 Progress has been saved to database');
     process.exit(0);
 });
@@ -250,4 +286,4 @@ if (require.main === module) {
     main();
 }
 
-module.exports = { InactiveTickerRevalidator };
+module.exports = { ActiveTickerRevalidator };

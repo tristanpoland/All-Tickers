@@ -1,6 +1,3 @@
 node_modules/
 output/
-*.db
-*.db
-src/tickers.db
-src/tickers.db
+src/db/*.db

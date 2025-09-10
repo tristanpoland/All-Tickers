@@ -2,11 +2,11 @@ const sqlite3 = require('sqlite3').verbose();
 const fs = require('fs');
 const path = require('path');
 
-class ResultsExporter {
+class TickerExporter {
     constructor() {
-        this.dbPath = path.join(__dirname, 'tickers.db');
+        this.dbPath = path.join(__dirname, '..', 'db', 'tickers.db');
         this.db = new sqlite3.Database(this.dbPath);
-        this.outputDir = path.join(__dirname, '..', 'output'); // One level above src
+        this.outputDir = path.join(__dirname, '..', '..', 'output'); // Two levels above src/export
         this.resultsPath = path.join(this.outputDir, 'results.json');
         this.activeTickersPath = path.join(this.outputDir, 'active_tickers.json');
         this.delistedTickersPath = path.join(this.outputDir, 'delisted_tickers.json');
@@ -307,7 +307,7 @@ async function main() {
     console.log('📤 All-Tickers Results Exporter v2.0');
     console.log('=====================================');
     
-    const exporter = new ResultsExporter();
+    const exporter = new TickerExporter();
     
     try {
         // Parse command line arguments
@@ -417,4 +417,4 @@ if (require.main === module) {
     main().catch(console.error);
 }
 
-module.exports = ResultsExporter;
+module.exports = TickerExporter;
