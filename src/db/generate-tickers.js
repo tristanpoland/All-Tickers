@@ -57,21 +57,21 @@ class TickerGenerator {
             }
         }
 
-        // Generate 4-letter tickers (AAAA-ZZZZ)
-        for (let i = 0; i < alphabet.length; i++) {
-            for (let j = 0; j < alphabet.length; j++) {
-                for (let k = 0; k < alphabet.length; k++) {
-                    for (let l = 0; l < alphabet.length; l++) {
-                        tickers.push(alphabet[i] + alphabet[j] + alphabet[k] + alphabet[l]);
-                    }
-                }
-            }
-        }
+        // // Generate 4-letter tickers (AAAA-ZZZZ)
+        // for (let i = 0; i < alphabet.length; i++) {
+        //     for (let j = 0; j < alphabet.length; j++) {
+        //         for (let k = 0; k < alphabet.length; k++) {
+        //             for (let l = 0; l < alphabet.length; l++) {
+        //                 tickers.push(alphabet[i] + alphabet[j] + alphabet[k] + alphabet[l]);
+        //             }
+        //         }
+        //     }
+        // }
 
-        // (NOTE!) this command will run into the time limit of the Yahoo Finance API, still working on a solution!
-        // the 5-letter ticker generation is commented out for now to prevent excessive API calls, it is anticipated that it will take 100+ hours to complete validation of all 1-5 letter tickers alone which is way beyond the scopt, so i may need to figure out a way to batch the tickers and have a checkpoint system to resume where it left off.
+        // // (NOTE!) this command will run into the time limit of the Yahoo Finance API, still working on a solution!
+        // // the 5-letter ticker generation is commented out for now to prevent excessive API calls, it is anticipated that it will take 100+ hours to complete validation of all 1-5 letter tickers alone which is way beyond the scopt, so i may need to figure out a way to batch the tickers and have a checkpoint system to resume where it left off.
        
-        // Generate 5-letter tickers (AAAAA-ZZZZZ)
+        // // Generate 5-letter tickers (AAAAA-ZZZZZ)
         // for (let i = 0; i < alphabet.length; i++) {
         //     for (let j = 0; j < alphabet.length; j++) {
         //         for (let k = 0; k < alphabet.length; k++) {

@@ -373,7 +373,7 @@ async function processAllActiveTickers() {
         console.log('⚡ Starting batch processing...\n');
         
         // Process tickers in batches to avoid overwhelming the API
-        const batchSize = 10; // Much smaller batch size to be more respectful of API limits
+        const batchSize = 25; // Much smaller batch size to be more respectful of API limits
         let skipped = 0;
         
         for (let i = 0; i < activeTickers.length; i += batchSize) {

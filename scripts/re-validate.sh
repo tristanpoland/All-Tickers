@@ -1,10 +1,3 @@
-#!/bin/bash
-
-# All-Tickers Pipeline - Complete Data Collection & Export Process
-# =================================================================
-# The step by step process to run the full pipeline:
-# generate tickers -> validate tickers -> revalidate active -> revalidate inactive -> 
-# return data (using database, and 10gb of heap storage) -> export data (using database, and 10gb of heap storage)
 
 set -e  # Exit on any error
 
@@ -53,38 +46,6 @@ print_section "🚀 ALL-TICKERS PIPELINE STARTING"
 echo -e "${BLUE}Pipeline started at: $(date)${NC}"
 echo -e "${BLUE}Memory allocation: 10GB heap space${NC}"
 echo -e "${BLUE}Current directory: $(pwd)${NC}\n"
-
-# Step 1: Generate Tickers
-print_step "1" "Generate Tickers (Database Setup)"
-if [ -f "src/db/generate-tickers.js" ]; then
-    cd src/db
-    if node generate-tickers.js; then
-        print_success "Ticker generation completed"
-    else
-        print_error "Ticker generation failed"
-        exit 1
-    fi
-    cd ../..
-else
-    print_error "Generate tickers script not found at src/db/generate-tickers.js"
-    exit 1
-fi
-
-# Step 2: Validate Tickers
-print_step "2" "Validate Tickers (Initial Validation)"
-if [ -f "src/validate/validate-tickers.js" ]; then
-    cd src/validate
-    if node validate-tickers.js; then
-        print_success "Initial ticker validation completed"
-    else
-        print_error "Initial ticker validation failed"
-        exit 1
-    fi
-    cd ../..
-else
-    print_error "Validate tickers script not found at src/validate/validate-tickers.js"
-    exit 1
-fi
 
 # Step 3: Revalidate Active Tickers
 print_step "3" "Revalidate Active Tickers"
