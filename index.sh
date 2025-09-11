@@ -86,37 +86,37 @@ else
     exit 1
 fi
 
-# Step 3: Revalidate Active Tickers
-print_step "3" "Revalidate Active Tickers"
-if [ -f "src/validate/revalidate-active.js" ]; then
-    cd src/validate
-    if node revalidate-active.js; then
-        print_success "Active ticker revalidation completed"
-    else
-        print_error "Active ticker revalidation failed"
-        exit 1
-    fi
-    cd ../..
-else
-    print_error "Revalidate active script not found at src/validate/revalidate-active.js"
-    exit 1
-fi
+# # Step 3: Revalidate Active Tickers
+# print_step "3" "Revalidate Active Tickers"
+# if [ -f "src/validate/revalidate-active.js" ]; then
+#     cd src/validate
+#     if node revalidate-active.js; then
+#         print_success "Active ticker revalidation completed"
+#     else
+#         print_error "Active ticker revalidation failed"
+#         exit 1
+#     fi
+#     cd ../..
+# else
+#     print_error "Revalidate active script not found at src/validate/revalidate-active.js"
+#     exit 1
+# fi
 
-# Step 4: Revalidate Inactive Tickers
-print_step "4" "Revalidate Inactive Tickers"
-if [ -f "src/validate/revalidate-inactive.js" ]; then
-    cd src/validate
-    if node revalidate-inactive.js; then
-        print_success "Inactive ticker revalidation completed"
-    else
-        print_error "Inactive ticker revalidation failed"
-        exit 1
-    fi
-    cd ../..
-else
-    print_error "Revalidate inactive script not found at src/validate/revalidate-inactive.js"
-    exit 1
-fi
+# # Step 4: Revalidate Inactive Tickers
+# print_step "4" "Revalidate Inactive Tickers"
+# if [ -f "src/validate/revalidate-inactive.js" ]; then
+#     cd src/validate
+#     if node revalidate-inactive.js; then
+#         print_success "Inactive ticker revalidation completed"
+#     else
+#         print_error "Inactive ticker revalidation failed"
+#         exit 1
+#     fi
+#     cd ../..
+# else
+#     print_error "Revalidate inactive script not found at src/validate/revalidate-inactive.js"
+#     exit 1
+# fi
 
 # Step 5: Return Data (Comprehensive Data Collection)
 print_step "5" "Return Data Collection (High Memory Usage)"
@@ -167,4 +167,3 @@ if [ -d "output" ]; then
 fi
 
 echo -e "\n${PURPLE}Pipeline execution completed. All steps successful! 🚀${NC}\n"
-

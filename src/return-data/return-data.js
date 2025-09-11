@@ -200,7 +200,7 @@ async function getTickerData(symbol) {
         // Get comprehensive ticker data with error suppression
         const quote = await yahooFinance.quote(symbol, {}, { validateResult: false });
         const historicalData = await yahooFinance.historical(symbol, {
-            period1: '2001-01-01',
+            period1: '2025-01-01',
             period2: new Date().toISOString().split('T')[0],
             interval: '1d'
         }, { validateResult: false });
@@ -223,7 +223,7 @@ async function getTickerData(symbol) {
                 version: '2.0.0',
                 hadValidationWarnings: hadValidationWarnings,
                 historicalPeriod: {
-                    start: '2001-01-01',
+                    start: '2025-01-01',
                     end: new Date().toISOString().split('T')[0]
                 },
                 recordCount: {
@@ -345,7 +345,7 @@ async function loadActiveTickers() {
     }
 }
 
-// Process all active tickers from active_tickers.json
+// Process all active tickers with batch processing and session management
 async function processAllActiveTickers() {
     console.log('🚀 Processing all active tickers with comprehensive data...');
     
@@ -355,7 +355,7 @@ async function processAllActiveTickers() {
         // Enable error suppression for cleaner output
         toggleErrorSuppression(true);
         
-        // Load active tickers from the JSON file
+        // Load active tickers from the database
         const activeTickers = await loadActiveTickers();
         console.log(`📊 Found ${activeTickers.length} active tickers to process`);
         
@@ -369,65 +369,140 @@ async function processAllActiveTickers() {
         const errors = [];
         const schemaErrors = [];
         let processed = 0;
+        let requestCount = 0;
+        let skipped = 0;
         
         console.log('⚡ Starting batch processing...\n');
         
-        // Process tickers in batches to avoid overwhelming the API
-        const batchSize = 10; // Much smaller batch size to be more respectful of API limits
-        let skipped = 0;
+        const startTime = Date.now();
+        
+        // Process tickers in batches of 500
+        const batchSize = 500;
+        
+        // Force refresh cookies/crumbs every 10,000 requests
+        const refreshInterval = 10000;
+        
+        // Enable concurrent processing (similar to validate script)
+        const concurrentRequests = 25; // Conservative for comprehensive data
+        
+        // Function to force refresh cookies/crumbs
+        async function refreshSession() {
+            try {
+                console.log('🔄 Refreshing cookies and crumbs for rate limit prevention...');
+                // Force a simple quote to refresh session
+                await yahooFinance.quote('AAPL', {}, { validateResult: false });
+                console.log('✅ Session refreshed successfully');
+                await new Promise(resolve => setTimeout(resolve, 2000)); // 2 second pause after refresh
+            } catch (error) {
+                console.log('⚠️  Session refresh warning (continuing anyway):', error.message);
+            }
+        }
         
         for (let i = 0; i < activeTickers.length; i += batchSize) {
             const batch = activeTickers.slice(i, i + batchSize);
+            const batchNumber = Math.floor(i / batchSize) + 1;
+            const totalBatches = Math.ceil(activeTickers.length / batchSize);
             
-            // Process current batch sequentially to avoid API rate limits
-            for (const symbol of batch) {
-                try {
-                    // Check if ticker was updated in the last 24 hours
-                    const recentCheck = await database.isTickerRecentlyChecked(symbol, 24);
-                    
-                    if (recentCheck.isRecent) {
-                        skipped++;
-                        
-                        // Show skip message occasionally for transparency
-                        if (skipped % 50 === 1 || skipped <= 10) {
-                            console.log(`⏭️  Skipping ${symbol} (updated ${recentCheck.hoursSince}h ago)`);
-                        }
-                        
-                        processed++; // Count as processed for progress tracking
-                        continue;
-                    }
-                    
-                    const result = await saveTickerDataToDB(symbol, database);
-                    processed++;
-                    
-                    // Show progress every 10 tickers for better visibility
-                    if (processed % 10 === 0 || processed === activeTickers.length) {
-                        const percentage = ((processed / activeTickers.length) * 100).toFixed(1);
-                        const dbCount = await database.getTickerCount();
-                        console.log(`📈 Progress: ${processed}/${activeTickers.length} (${percentage}%) - Latest: ${symbol} - DB Records: ${dbCount} - Skipped: ${skipped}`);
-                    }
-                    
-                    if (result.success) {
-                        results.push(result);
-                    } else {
-                        if (result.errorType === 'SCHEMA_VALIDATION') {
-                            schemaErrors.push({ symbol, error: result.error || 'Schema validation error' });
-                        } else {
-                            errors.push({ symbol, error: result.error || 'Unknown error' });
-                        }
-                    }
-                } catch (error) {
-                    errors.push({ symbol, error: error.message });
-                }
-                
-                // Add much longer delay between each request to respect rate limits
-                await new Promise(resolve => setTimeout(resolve, 2000)); // 2 second delay between requests
+            console.log(`\n📦 Processing batch ${batchNumber}/${totalBatches}: ${batch.length} tickers (${i + 1}-${Math.min(i + batchSize, activeTickers.length)})`);
+            
+            // Check if we need to refresh session before this batch
+            if (requestCount > 0 && requestCount % refreshInterval === 0) {
+                await refreshSession();
             }
             
-            // Add much longer delay between batches
+            // Track tickers that need updates vs those that are recent
+            let batchNeedsUpdate = [];
+            let batchRecentlyUpdated = [];
+            
+            // First pass: Check which tickers need updates (batch operation for efficiency)
+            for (const symbol of batch) {
+                const recentCheck = await database.isTickerRecentlyChecked(symbol, 24);
+                if (recentCheck.isRecent) {
+                    batchRecentlyUpdated.push({ symbol, hoursSince: recentCheck.hoursSince });
+                } else {
+                    batchNeedsUpdate.push(symbol);
+                }
+            }
+            
+            skipped += batchRecentlyUpdated.length;
+            
+            console.log(`   📊 Batch ${batchNumber}: ${batchNeedsUpdate.length} need updates, ${batchRecentlyUpdated.length} recently updated (skipping)`);
+            
+            if (batchRecentlyUpdated.length > 0) {
+                // Show some examples of skipped tickers
+                const examples = batchRecentlyUpdated.slice(0, 3).map(t => `${t.symbol}(${t.hoursSince}h)`).join(', ');
+                console.log(`   ⏭️  Skipped examples: ${examples}${batchRecentlyUpdated.length > 3 ? ` +${batchRecentlyUpdated.length - 3} more` : ''}`);
+            }
+            
+            // Process only tickers that need updates with concurrent processing
+            const processTickersConcurrent = async (tickersToProcess) => {
+                const chunkSize = concurrentRequests;
+                const chunks = [];
+                for (let j = 0; j < tickersToProcess.length; j += chunkSize) {
+                    chunks.push(tickersToProcess.slice(j, j + chunkSize));
+                }
+                
+                for (const chunk of chunks) {
+                    // Process chunk concurrently
+                    const promises = chunk.map(async (symbol) => {
+                        try {
+                            const result = await saveTickerDataToDB(symbol, database);
+                            requestCount++;
+                            
+                            if (result.success) {
+                                results.push(result);
+                                console.log(`   ✅ ${symbol}: Updated successfully`);
+                                return { symbol, success: true };
+                            } else {
+                                if (result.errorType === 'SCHEMA_VALIDATION') {
+                                    schemaErrors.push({ symbol, error: result.error || 'Schema validation error' });
+                                    console.log(`   🔄 ${symbol}: Marked inactive (schema error)`);
+                                } else {
+                                    errors.push({ symbol, error: result.error || 'Unknown error' });
+                                    console.log(`   ❌ ${symbol}: ${result.error}`);
+                                }
+                                return { symbol, success: false };
+                            }
+                        } catch (error) {
+                            errors.push({ symbol, error: error.message });
+                            console.log(`   ❌ ${symbol}: ${error.message}`);
+                            requestCount++;
+                            return { symbol, success: false };
+                        }
+                    });
+                    
+                    // Wait for chunk to complete
+                    await Promise.allSettled(promises);
+                    
+                    // Shorter delay between chunks (instead of 2 seconds per ticker)
+                    if (chunks.indexOf(chunk) < chunks.length - 1) {
+                        await new Promise(resolve => setTimeout(resolve, 500)); // 500ms between chunks
+                    }
+                }
+            };
+            
+            if (batchNeedsUpdate.length > 0) {
+                await processTickersConcurrent(batchNeedsUpdate);
+            }
+            
+            processed += batchNeedsUpdate.length;
+            
+            // Update processed count to include skipped items for accurate progress tracking
+            processed += batchRecentlyUpdated.length;
+            
+            // Show batch completion and overall progress with speed metrics
+            const currentTime = Date.now();
+            const elapsedTime = currentTime - startTime;
+            const percentage = ((processed / activeTickers.length) * 100).toFixed(1);
+            const dbCount = await database.getTickerCount();
+            const tickersPerSecond = requestCount > 0 ? Math.round((requestCount / (elapsedTime / 1000)) * 10) / 10 : 0;
+            
+            console.log(`   ✅ Batch ${batchNumber} complete! Overall: ${processed}/${activeTickers.length} (${percentage}%) - DB: ${dbCount} records - Requests: ${requestCount} - Speed: ${tickersPerSecond}/sec`);
+            
+            // Shorter delay between batches (2 seconds instead of 10)
             if (i + batchSize < activeTickers.length) {
-                console.log(`⏸️  Batch ${Math.floor(i/batchSize) + 1} completed. Pausing for 10 seconds to respect API limits...`);
-                await new Promise(resolve => setTimeout(resolve, 10000)); // 10 second delay between batches
+                console.log(`   ⏸️  Pausing 2s before next batch...`);
+                await new Promise(resolve => setTimeout(resolve, 2000));
             }
         }
         
@@ -437,14 +512,25 @@ async function processAllActiveTickers() {
         
         // Summary
         console.log('\n🎉 Processing completed!');
+        console.log(`📊 Total tickers processed: ${processed}/${activeTickers.length}`);
         console.log(`✅ Successfully processed: ${results.length} tickers`);
+        console.log(`⏭️  Skipped (recently updated): ${skipped} tickers`);
         console.log(`❌ Failed to process: ${errors.length} tickers`);
-        console.log(`� Schema errors (marked inactive): ${schemaErrors.length} tickers`);
-        console.log(`�💾 Total records in database: ${finalDbCount}`);
+        console.log(`🔄 Schema errors (marked inactive): ${schemaErrors.length} tickers`);
+        console.log(`🌐 Total API requests made: ${requestCount}`);
+        console.log(`💾 Total records in database: ${finalDbCount}`);
         
         const totalProcessed = results.length + errors.length + schemaErrors.length;
-        const successRate = ((results.length / totalProcessed) * 100).toFixed(1);
-        console.log(`📊 Success rate: ${successRate}%`);
+        const successRate = totalProcessed > 0 ? ((results.length / totalProcessed) * 100).toFixed(1) : '0.0';
+        const efficiencyRate = ((totalProcessed / activeTickers.length) * 100).toFixed(1);
+        console.log(`� Success rate: ${successRate}% (of actually processed)`);
+        console.log(`⚡ Efficiency rate: ${efficiencyRate}% (avoided ${skipped} unnecessary requests)`);
+        
+        // Show refresh statistics
+        const refreshCount = Math.floor(requestCount / refreshInterval);
+        if (refreshCount > 0) {
+            console.log(`🔄 Session refreshes performed: ${refreshCount} (every ${refreshInterval.toLocaleString()} requests)`);
+        }
         
         console.log('\n📝 Recently updated tickers:');
         recentUpdates.forEach(ticker => {
@@ -476,11 +562,15 @@ async function processAllActiveTickers() {
             processedDate: new Date().toISOString(),
             totalTickers: activeTickers.length,
             successfullyProcessed: results.length,
+            skipped: skipped,
             failed: errors.length,
             schemaErrors: schemaErrors.length,
+            totalApiRequests: requestCount,
+            sessionRefreshes: refreshCount,
             successRate: `${successRate}%`,
+            efficiencyRate: `${efficiencyRate}%`,
             databaseRecords: finalDbCount,
-            databasePath: path.join(__dirname, 'ticker_data.db'),
+            databasePath: path.join(__dirname, '..', 'db', 'ticker_data.db'),
             recentUpdates: recentUpdates,
             errors: errors.slice(0, 100), // Limit errors in summary to first 100
             schemaErrorTickers: schemaErrors.slice(0, 50) // Limit schema errors to first 50
@@ -490,7 +580,7 @@ async function processAllActiveTickers() {
         if (!fs.existsSync(outputDir)) {
             fs.mkdirSync(outputDir, { recursive: true });
         }
-        const summaryPath = path.join(outputDir, 'Error-Summary.json');
+        const summaryPath = path.join(outputDir, 'Return-Data-Summary.json');
         fs.writeFileSync(summaryPath, JSON.stringify(summaryData, null, 2));
         
         console.log(`\n📄 Processing summary saved to: ${summaryPath}`);
