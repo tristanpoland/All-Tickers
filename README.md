@@ -179,14 +179,10 @@ npm run export-nyse                # NYSE tickers only
 ## Performance & Scale
 
 - **Current Config**: Single-letter tickers only (A-Z = 26 tickers)
-- **Full Scale**: Enable 2-4 letter combinations for ~475K tickers
-- **Processing Time**: ~2-4 hours for full dataset (with rate limiting)
-- **Expected Results**: ~3% active tickers (15K-17K stocks at full scale)
+- **Full Scale**: Enable 1-5 letter combinations (A-ZZZZZ = ~12.3M tickers)
+- **Processing Time**: Extended timeline for full dataset (with rate limiting)
+- **Expected Results**: ~3% active tickers per 1-zzzz (potentially 300K+ stocks at full scale)
 - **Memory Usage**: 10GB heap allocation for large dataset processing
-
-## Configuration
-
-To enable full ticker generation, edit `src/db/generate-tickers.js` and uncomment the 2, 3, and 4-letter ticker generation sections.
 
 ## Support This Project
 
