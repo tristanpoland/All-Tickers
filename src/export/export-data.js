@@ -11,14 +11,32 @@ class DataExporter {
 
     async getAllTickerData() {
         return new Promise((resolve, reject) => {
-            const sql = 'SELECT * FROM ticker_data ORDER BY ticker ASC';
-            
-            this.db.all(sql, (err, rows) => {
+            // First check how many records we have
+            this.db.get('SELECT COUNT(*) as count FROM ticker_data', (err, countRow) => {
                 if (err) {
                     reject(err);
-                } else {
-                    resolve(rows);
+                    return;
                 }
+                
+                const totalCount = countRow.count;
+                console.log(`📊 Found ${totalCount} records in database`);
+                
+                // If too many records, reject to force streaming approach
+                if (totalCount > 1000) {
+                    console.log('⚠️  Too many records for memory loading - will use streaming...');
+                    resolve({ useStreaming: true, totalCount });
+                    return;
+                }
+                
+                // Safe to load into memory
+                const sql = 'SELECT * FROM ticker_data ORDER BY ticker ASC';
+                this.db.all(sql, (err, rows) => {
+                    if (err) {
+                        reject(err);
+                    } else {
+                        resolve(rows);
+                    }
+                });
             });
         });
     }
@@ -28,13 +46,14 @@ class DataExporter {
         
         try {
             const rawData = await this.getAllTickerData();
-            console.log(`📊 Processing ${rawData.length} records for JSON export...`);
             
-            // Check if data is too large for memory
-            if (rawData.length > 10000) {
-                console.log('⚠️  Large dataset detected - using streaming export...');
-                return await this.exportToJSONStreaming(rawData);
+            // Check if we should use streaming (either too many records or special flag)
+            if (rawData.useStreaming || (Array.isArray(rawData) && rawData.length > 1000)) {
+                console.log('⚠️  Using streaming export for large dataset...');
+                return await this.exportToJSONStreamingFromDB();
             }
+            
+            console.log(`📊 Processing ${rawData.length} records for JSON export...`);
             
             // Parse JSON data and create structured export
             const exportData = {
@@ -74,6 +93,137 @@ class DataExporter {
             
         } catch (error) {
             console.error('❌ Error exporting to JSON:', error.message);
+            throw error;
+        }
+    }
+
+    async exportToJSONStreamingFromDB() {
+        const jsonPath = path.join(this.outputDir, 'DATA.json');
+        
+        try {
+            // Ensure output directory exists
+            if (!fs.existsSync(this.outputDir)) {
+                fs.mkdirSync(this.outputDir, { recursive: true });
+            }
+            
+            console.log('🚀 Starting streaming JSON export directly from database...');
+            
+            // Get total count for progress tracking
+            const totalCount = await new Promise((resolve, reject) => {
+                this.db.get('SELECT COUNT(*) as count FROM ticker_data', (err, row) => {
+                    if (err) reject(err);
+                    else resolve(row.count);
+                });
+            });
+            
+            console.log(`📊 Will export ${totalCount} records using database streaming...`);
+            
+            // Create write stream
+            const writeStream = fs.createWriteStream(jsonPath, {
+                encoding: 'utf8',
+                highWaterMark: 16 * 1024 // 16KB buffer
+            });
+            
+            // Increase max listeners to prevent warning
+            writeStream.setMaxListeners(50);
+            
+            // Handle stream errors
+            writeStream.on('error', (error) => {
+                console.error('❌ Write stream error:', error);
+                throw error;
+            });
+            
+            // Helper function to write with backpressure handling
+            const writeToStream = async (data) => {
+                return new Promise((resolve, reject) => {
+                    const canContinue = writeStream.write(data);
+                    if (canContinue) {
+                        resolve();
+                    } else {
+                        writeStream.once('drain', resolve);
+                        writeStream.once('error', reject);
+                    }
+                });
+            };
+            
+            // Write metadata and opening
+            const metadata = {
+                exportDate: new Date().toISOString(),
+                totalRecords: totalCount,
+                dataSource: 'All-Tickers Comprehensive Data Collection',
+                version: '2.0.0',
+                description: 'Complete financial data for active tickers including quotes, historical data, and company summaries'
+            };
+            
+            await writeToStream('{\n');
+            await writeToStream(`  "metadata": ${JSON.stringify(metadata, null, 2).split('\n').join('\n  ')},\n`);
+            await writeToStream('  "tickers": [\n');
+            
+            // Process records in small chunks directly from database
+            const chunkSize = 50;
+            let processedCount = 0;
+            let exportedCount = 0;
+            
+            for (let offset = 0; offset < totalCount; offset += chunkSize) {
+                const chunk = await new Promise((resolve, reject) => {
+                    const sql = 'SELECT * FROM ticker_data ORDER BY ticker ASC LIMIT ? OFFSET ?';
+                    this.db.all(sql, [chunkSize, offset], (err, rows) => {
+                        if (err) reject(err);
+                        else resolve(rows);
+                    });
+                });
+                
+                for (let i = 0; i < chunk.length; i++) {
+                    const row = chunk[i];
+                    const isLast = processedCount === totalCount - 1;
+                    
+                    try {
+                        const tickerData = {
+                            ticker: row.ticker,
+                            lastUpdated: row.last_updated,
+                            createdAt: row.created_at,
+                            data: JSON.parse(row.json_data)
+                        };
+                        
+                        const jsonString = JSON.stringify(tickerData, null, 4).split('\n').join('\n    ');
+                        await writeToStream(`    ${jsonString}${isLast ? '' : ','}\n`);
+                        exportedCount++;
+                        
+                    } catch (parseError) {
+                        console.log(`⚠️  Skipping ${row?.ticker || 'unknown'} due to JSON parse error: ${parseError.message}`);
+                    }
+                    
+                    processedCount++;
+                }
+                
+                // Progress update
+                const percentage = ((processedCount / totalCount) * 100).toFixed(1);
+                console.log(`📈 JSON Export Progress: ${processedCount}/${totalCount} (${percentage}%)`);
+                
+                // Small delay to prevent overwhelming
+                if (offset + chunkSize < totalCount) {
+                    await new Promise(resolve => setTimeout(resolve, 10));
+                }
+            }
+            
+            await writeToStream('  ]\n');
+            await writeToStream('}\n');
+            
+            // Properly close the stream
+            return new Promise((resolve, reject) => {
+                writeStream.end((error) => {
+                    if (error) {
+                        reject(error);
+                    } else {
+                        console.log(`✅ Database streaming JSON export completed: ${jsonPath}`);
+                        console.log(`📊 Records exported: ${exportedCount}/${totalCount} (${totalCount - exportedCount} skipped due to errors)`);
+                        resolve(jsonPath);
+                    }
+                });
+            });
+            
+        } catch (error) {
+            console.error('❌ Error in database streaming JSON export:', error.message);
             throw error;
         }
     }
@@ -128,7 +278,7 @@ class DataExporter {
             await writeToStream('  "tickers": [\n');
             
             // Process records in smaller chunks to reduce memory pressure
-            const chunkSize = 50; // Reduced chunk size
+            const chunkSize = 10; // Much smaller chunk size for memory efficiency
             let processedCount = 0;
             
             for (let i = 0; i < rawData.length; i += chunkSize) {
@@ -196,6 +346,13 @@ class DataExporter {
         
         try {
             const rawData = await this.getAllTickerData();
+            
+            // Check if we should use streaming (either too many records or special flag)
+            if (rawData.useStreaming || (Array.isArray(rawData) && rawData.length > 1000)) {
+                console.log('⚠️  Using streaming CSV export for large dataset...');
+                return await this.exportToCSVStreamingFromDB();
+            }
+            
             console.log(`📊 Processing ${rawData.length} records for CSV export...`);
             
             // Ensure output directory exists
@@ -400,6 +557,167 @@ class DataExporter {
         console.log(`📋 CSV Columns: ${csvHeaders.split(',').length}`);
         
         return csvPath;
+    }
+
+    async exportToCSVStreamingFromDB() {
+        const csvPath = path.join(this.outputDir, 'DATA.csv');
+        
+        try {
+            // Ensure output directory exists
+            if (!fs.existsSync(this.outputDir)) {
+                fs.mkdirSync(this.outputDir, { recursive: true });
+            }
+            
+            console.log('🚀 Starting streaming CSV export directly from database...');
+            
+            // Get total count for progress tracking
+            const totalCount = await new Promise((resolve, reject) => {
+                this.db.get('SELECT COUNT(*) as count FROM ticker_data', (err, row) => {
+                    if (err) reject(err);
+                    else resolve(row.count);
+                });
+            });
+            
+            console.log(`📊 Will export ${totalCount} records using database streaming...`);
+            
+            // Create write stream
+            const writeStream = fs.createWriteStream(csvPath, {
+                encoding: 'utf8',
+                highWaterMark: 16 * 1024 // 16KB buffer
+            });
+            
+            // Increase max listeners to prevent warning
+            writeStream.setMaxListeners(20);
+            
+            // Handle stream errors
+            writeStream.on('error', (error) => {
+                console.error('❌ Write stream error:', error);
+                throw error;
+            });
+            
+            // Helper function to write with backpressure handling
+            const writeToStream = async (data) => {
+                return new Promise((resolve, reject) => {
+                    const canContinue = writeStream.write(data);
+                    if (canContinue) {
+                        resolve();
+                    } else {
+                        writeStream.once('drain', resolve);
+                        writeStream.once('error', reject);
+                    }
+                });
+            };
+            
+            // CSV headers
+            const csvHeaders = [
+                'ticker',
+                'last_updated',
+                'created_at',
+                'current_price',
+                'market_cap',
+                'pe_ratio',
+                'dividend_yield',
+                'fifty_two_week_high',
+                'fifty_two_week_low',
+                'avg_volume',
+                'exchange',
+                'sector',
+                'industry',
+                'company_name',
+                'market_state',
+                'currency',
+                'historical_data_points',
+                'price_change_percent',
+                'average_close_historical',
+                'data_fetch_success'
+            ].join(',');
+            
+            await writeToStream(csvHeaders + '\n');
+            
+            // Process records in small chunks directly from database
+            const chunkSize = 50;
+            let processedCount = 0;
+            let exportedCount = 0;
+            
+            for (let offset = 0; offset < totalCount; offset += chunkSize) {
+                const chunk = await new Promise((resolve, reject) => {
+                    const sql = 'SELECT * FROM ticker_data ORDER BY ticker ASC LIMIT ? OFFSET ?';
+                    this.db.all(sql, [chunkSize, offset], (err, rows) => {
+                        if (err) reject(err);
+                        else resolve(rows);
+                    });
+                });
+                
+                for (let i = 0; i < chunk.length; i++) {
+                    const row = chunk[i];
+                    
+                    try {
+                        const data = JSON.parse(row.json_data);
+                        const quote = data.quote || {};
+                        const summary = data.summary || {};
+                        const stats = data.statistics?.historicalStats || {};
+                        
+                        // Extract key financial metrics
+                        const csvRow = [
+                            `"${row.ticker}"`,
+                            `"${row.last_updated}"`,
+                            `"${row.created_at}"`,
+                            quote.regularMarketPrice || '',
+                            quote.marketCap || '',
+                            quote.trailingPE || '',
+                            quote.dividendYield || '',
+                            quote.fiftyTwoWeekHigh || '',
+                            quote.fiftyTwoWeekLow || '',
+                            quote.averageVolume || '',
+                            `"${quote.fullExchangeName || ''}"`,
+                            `"${summary.assetProfile?.sector || ''}"`,
+                            `"${summary.assetProfile?.industry || ''}"`,
+                            `"${quote.longName || quote.shortName || ''}"`,
+                            `"${quote.marketState || ''}"`,
+                            `"${quote.currency || ''}"`,
+                            stats.totalDays || '',
+                            stats.priceChange || '',
+                            stats.averageClose || '',
+                            data.metadata?.error ? 'false' : 'true'
+                        ].join(',');
+                        
+                        await writeToStream(csvRow + '\n');
+                        exportedCount++;
+                        
+                    } catch (parseError) {
+                        console.log(`⚠️  Skipping ${row?.ticker || 'unknown'} due to JSON parse error: ${parseError.message}`);
+                    }
+                    
+                    processedCount++;
+                }
+                
+                // Progress update
+                const percentage = ((processedCount / totalCount) * 100).toFixed(1);
+                console.log(`📈 CSV Export Progress: ${processedCount}/${totalCount} (${percentage}%)`);
+                
+                // Small delay to prevent overwhelming
+                if (offset + chunkSize < totalCount) {
+                    await new Promise(resolve => setTimeout(resolve, 10));
+                }
+            }
+            
+            // Properly close the stream
+            return new Promise((resolve, reject) => {
+                writeStream.end((error) => {
+                    if (error) {
+                        reject(error);
+                    } else {
+                        console.log(`✅ Database streaming CSV export completed: ${csvPath}`);
+                        console.log(`📊 Records exported: ${exportedCount}/${totalCount} (${totalCount - exportedCount} skipped due to errors)`);
+                        resolve(csvPath);
+                    }
+                });
+            });
+            
+        } catch (error) {
+            console.error('❌ Error in database streaming CSV export:', error.message);
+            throw error;
+        }
     }
 
     async getExportStats() {

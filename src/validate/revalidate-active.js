@@ -18,7 +18,7 @@ class ActiveTickerRevalidator {
     async getActiveTickers() {
         return new Promise((resolve, reject) => {
             const query = `
-                SELECT ticker, price, exchange
+                SELECT ticker, price, exchange, last_checked
                 FROM tickers 
                 WHERE active = 1
                 ORDER BY ticker
@@ -29,6 +29,32 @@ class ActiveTickerRevalidator {
                     reject(err);
                 } else {
                     resolve(rows);
+                }
+            });
+        });
+    }
+
+    // Check if a ticker was recently checked (within 24 hours)
+    async isTickerRecentlyChecked(ticker, hoursAgo = 24) {
+        return new Promise((resolve, reject) => {
+            const sql = `
+                SELECT ticker, last_checked,
+                       (julianday('now') - julianday(last_checked)) * 24 as hours_diff
+                FROM tickers 
+                WHERE ticker = ? 
+                AND last_checked IS NOT NULL
+                AND (julianday('now') - julianday(last_checked)) * 24 < ?
+            `;
+            
+            this.db.get(sql, [ticker, hoursAgo], (err, row) => {
+                if (err) {
+                    reject(err);
+                } else {
+                    resolve({
+                        isRecent: !!row,
+                        lastChecked: row ? row.last_checked : null,
+                        hoursSince: row ? Math.round(row.hours_diff * 100) / 100 : null
+                    });
                 }
             });
         });
@@ -104,7 +130,7 @@ class ActiveTickerRevalidator {
         return new Promise((resolve, reject) => {
             const query = `
                 UPDATE tickers 
-                SET active = ?, price = ?, exchange = ?
+                SET active = ?, price = ?, exchange = ?, last_checked = CURRENT_TIMESTAMP
                 WHERE ticker = ?
             `;
             
@@ -151,11 +177,39 @@ class ActiveTickerRevalidator {
         console.log('🔍 Starting revalidation of active tickers...\n');
         
         // Get all active tickers
-        const activeTickers = await this.getActiveTickers();
-        console.log(`📊 Found ${activeTickers.length.toLocaleString()} active tickers to revalidate\n`);
+        const allActiveTickers = await this.getActiveTickers();
+        console.log(`📊 Found ${allActiveTickers.length.toLocaleString()} active tickers in database`);
         
-        if (activeTickers.length === 0) {
+        if (allActiveTickers.length === 0) {
             console.log('✅ No active tickers found to revalidate!');
+            return;
+        }
+        
+        // Filter out recently checked tickers (within 24 hours)
+        console.log('🕐 Filtering out recently checked tickers (within 24 hours)...');
+        const tickersToCheck = [];
+        let skipped = 0;
+        
+        for (const tickerInfo of allActiveTickers) {
+            const recentCheck = await this.isTickerRecentlyChecked(tickerInfo.ticker, 24);
+            
+            if (recentCheck.isRecent) {
+                skipped++;
+                
+                // Show skip message occasionally for transparency
+                if (skipped % 50 === 1 || skipped <= 10) {
+                    console.log(`⏭️  Skipping ${tickerInfo.ticker} (checked ${recentCheck.hoursSince}h ago)`);
+                }
+            } else {
+                tickersToCheck.push(tickerInfo);
+            }
+        }
+        
+        console.log(`📋 Tickers to revalidate: ${tickersToCheck.length.toLocaleString()}`);
+        console.log(`⏭️  Skipped (recent): ${skipped.toLocaleString()}\n`);
+        
+        if (tickersToCheck.length === 0) {
+            console.log('✅ All active tickers were recently validated! No revalidation needed.');
             return;
         }
         
@@ -163,14 +217,42 @@ class ActiveTickerRevalidator {
         let totalNowInactive = 0;
         let totalPriceUpdates = 0;
         let totalErrors = 0;
+        let requestCount = 0; // Track total requests for refresh timing
+        
+        // Force refresh cookies/crumbs every 10,000 requests
+        const refreshInterval = 10000;
+        
+        // Function to force refresh cookies/crumbs (similar to return-data script)
+        async function refreshSession() {
+            try {
+                console.log('🔄 Refreshing cookies and crumbs for rate limit prevention...');
+                // Force a simple request to refresh session
+                const refreshUrl = 'https://query1.finance.yahoo.com/v8/finance/chart/AAPL';
+                await axios.get(refreshUrl, {
+                    timeout: 5000,
+                    headers: {
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                    }
+                });
+                console.log('✅ Session refreshed successfully');
+                await new Promise(resolve => setTimeout(resolve, 2000)); // 2 second pause after refresh
+            } catch (error) {
+                console.log('⚠️  Session refresh warning (continuing anyway):', error.message);
+            }
+        }
         
         // Process in batches
-        for (let i = 0; i < activeTickers.length; i += this.batchSize) {
-            const batch = activeTickers.slice(i, i + this.batchSize);
+        for (let i = 0; i < tickersToCheck.length; i += this.batchSize) {
+            const batch = tickersToCheck.slice(i, i + this.batchSize);
             const batchNum = Math.floor(i / this.batchSize) + 1;
-            const totalBatches = Math.ceil(activeTickers.length / this.batchSize);
+            const totalBatches = Math.ceil(tickersToCheck.length / this.batchSize);
             
             console.log(`🚀 Processing batch ${batchNum}/${totalBatches} (${batch.length} tickers)...`);
+            
+            // Check if we need to refresh session before this batch
+            if (requestCount > 0 && requestCount % refreshInterval === 0) {
+                await refreshSession();
+            }
             
             // Process batch in smaller concurrent chunks
             const chunkSize = this.concurrentRequests;
@@ -184,6 +266,9 @@ class ActiveTickerRevalidator {
             for (const chunk of chunks) {
                 const chunkResults = await this.validateTickersConcurrent(chunk);
                 batchResults.push(...chunkResults);
+                
+                // Update request count
+                requestCount += chunk.length;
                 
                 // Show any tickers that became inactive or had significant price changes
                 chunkResults.forEach(({ ticker, active, price, exchange, oldPrice, oldExchange }) => {
@@ -211,7 +296,7 @@ class ActiveTickerRevalidator {
                 console.log(`💾 Batch ${batchNum} completed: ${updateResults.nowInactive} became inactive, ${updateResults.priceUpdates} price updates`);
                 
                 // Progress update
-                const progress = ((i + batch.length) / activeTickers.length * 100).toFixed(1);
+                const progress = ((i + batch.length) / tickersToCheck.length * 100).toFixed(1);
                 console.log(`📈 Progress: ${progress}% (${totalNowInactive} now inactive, ${totalPriceUpdates} price updates so far)\n`);
                 
             } catch (error) {
@@ -220,7 +305,7 @@ class ActiveTickerRevalidator {
             }
             
             // Longer delay between batches to be respectful to the API
-            if (i + this.batchSize < activeTickers.length) {
+            if (i + this.batchSize < tickersToCheck.length) {
                 await new Promise(resolve => setTimeout(resolve, 1500));
             }
         }
@@ -232,7 +317,13 @@ class ActiveTickerRevalidator {
         console.log(`⚠️  Tickers now inactive: ${totalNowInactive.toLocaleString()}`);
         console.log(`📈 Price updates: ${totalPriceUpdates.toLocaleString()}`);
         console.log(`❌ Errors: ${totalErrors.toLocaleString()}`);
+        console.log(`🌐 Total API requests: ${requestCount.toLocaleString()}`);
         
+        // Show refresh statistics
+        const refreshCount = Math.floor(requestCount / refreshInterval);
+        if (refreshCount > 0) {
+            console.log(`🔄 Session refreshes performed: ${refreshCount} (every ${refreshInterval.toLocaleString()} requests)`);
+        }
         if (totalNowInactive > 0) {
             console.log(`\n🔍 Found ${totalNowInactive} tickers that are no longer active`);
             console.log('💡 Consider running export scripts to update your output files');

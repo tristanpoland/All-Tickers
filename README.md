@@ -5,15 +5,15 @@ Generate and validate all possible stock tickers (A-ZZZZ) to discover active sto
 ## Quick Start
 
 1. **Install dependencies:**
-   ```bash
+   ```
    npm install
+   or
+   npm i
    ```
 
 2. **Run the complete pipeline:**
-   ```bash
-   ./index.sh
-   # or
-   npm start
+   ```
+   npm run pipeline
    ```
 
 That's it! The system will generate ticker combinations, validate them against market APIs, collect comprehensive financial data, and export results to JSON/CSV in the `output/` directory.
@@ -33,6 +33,17 @@ The complete pipeline consists of 6 automated steps:
 
 ```
 All-Tickers/
+├── scripts/                      # NPM script wrappers with memory allocation
+│   ├── generate.sh               # Generate ticker combinations
+│   ├── validate.sh               # Initial validation
+│   ├── revalidate-active.sh      # Active ticker revalidation (24h skip logic)
+│   ├── revalidate-inactive.sh    # Inactive ticker revalidation (24h skip logic)
+│   ├── gather.sh                 # Comprehensive data collection
+│   ├── export.sh                 # Comprehensive JSON/CSV export (streaming)
+│   ├── export-legacy.sh          # Simple validation data export
+│   ├── export-nyse.sh            # NYSE-specific ticker export
+│   ├── test-validate.sh          # Test validation with limits
+│   └── pipeline.sh               # Complete 6-step pipeline
 ├── src/
 │   ├── db/
 │   │   ├── generate-tickers.js    # Step 1: Generate ticker combinations
@@ -57,32 +68,76 @@ All-Tickers/
 └── package.json                  # Dependencies and scripts
 ```
 
+## Script Summary
+
+### **Available Scripts (10 total):**
+
+#### **Core Pipeline Scripts (6):**
+- **`generate.sh`** - Generate all possible ticker combinations (A-ZZZZ)
+- **`validate.sh`** - Initial validation against Yahoo Finance API
+- **`revalidate-active.sh`** - Re-check active tickers (with 24h skip logic)
+- **`revalidate-inactive.sh`** - Re-check inactive tickers (with 24h skip logic)  
+- **`gather.sh`** - Collect comprehensive financial data for active tickers
+- **`export.sh`** - Export comprehensive data to JSON/CSV (streaming)
+
+#### **Specialized Export Scripts (2):**
+- **`export-legacy.sh`** - Export simple validation data (ticker, price, status)
+- **`export-nyse.sh`** - Export NYSE/NASDAQ tickers only
+
+#### **Utility Scripts (2):**
+- **`test-validate.sh`** - Test validation with limited ticker batch
+- **`pipeline.sh`** - Run complete 6-step pipeline sequence
+
+### **Key Features:**
+- ✅ **Memory Optimized**: All scripts use `--max-old-space-size=10240` (10GB)
+- ✅ **24-Hour Skip Logic**: Revalidation scripts avoid recently checked tickers
+- ✅ **Streaming Exports**: Handle large datasets without memory issues
+- ✅ **Constant crumb updates**: Updates a new crumb every 10000 tickers to make sure 
+- ✅ **Clean Organization**: No duplicate scripts, single purpose each
+
 ## Commands
 
-### Primary Commands
+### Primary Commands (With Memory Allocation)
 ```bash
 # Complete pipeline (recommended)
 ./index.sh                  # Full 6-step process with progress tracking
 npm start                   # Same as above
+npm run pipeline            # Alternative complete pipeline script
 
-# Individual pipeline steps
-cd src/db && node generate-tickers.js          # Step 1: Generate tickers
-cd src/validate && node validate-tickers.js    # Step 2: Validate tickers  
-cd src/validate && node revalidate-active.js   # Step 3: Revalidate active
-cd src/validate && node revalidate-inactive.js # Step 4: Revalidate inactive
-cd src/return-data && node return-data.js      # Step 5: Collect data
-cd src/export && node export-data.js           # Step 6: Export data
+# Individual pipeline steps (all include --max-old-space-size=10240)
+npm run generate            # Step 1: Generate ticker combinations  
+npm run validate            # Step 2: Initial validation
+npm run revalidate-active   # Step 3: Revalidate active tickers (24h skip)
+npm run revalidate-inactive # Step 4: Revalidate inactive tickers (24h skip)
+npm run gather              # Step 5: Collect comprehensive data
+npm run export              # Step 6: Export to JSON/CSV (streaming)
 ```
 
 ### Legacy/Specialized Commands
 ```bash
-# Legacy validation exports
-npm run export              # Export validation results to JSON
-npm run export:preview      # Preview current validation statistics
+# Legacy validation exports (simple ticker data with memory allocation)
+npm run export-legacy              # Export active tickers only (memory-safe)
+npm run test-validate              # Test validation with 100 ticker limit
 
-# Specialized exports  
-cd src/export && node export-nyse-results.js           # NYSE tickers only
-cd src/export && node export-nyse-results.js --preview # Preview NYSE data
+# Specialized exports (with memory allocation)  
+npm run export-nyse                # NYSE tickers only
+
+# Note: Legacy exports focus on active tickers to avoid memory issues with 12M+ records
+```
+
+### Direct Script Access
+```bash
+# All scripts include proper memory allocation (--max-old-space-size=10240)
+./scripts/generate.sh              # Generate ticker combinations
+./scripts/validate.sh              # Validate tickers against market APIs  
+./scripts/revalidate-active.sh     # Revalidate active tickers (24h skip)
+./scripts/revalidate-inactive.sh   # Revalidate inactive tickers (24h skip)
+./scripts/gather.sh                # Collect comprehensive financial data
+./scripts/export.sh                # Export comprehensive data (streaming)
+./scripts/export-legacy.sh         # Export simple validation data
+./scripts/export-nyse.sh           # Export NYSE-specific data
+./scripts/test-validate.sh         # Test validation (limited batch)
+./scripts/pipeline.sh              # Complete pipeline sequence
 ```
 
 ## Output Files
@@ -102,11 +157,13 @@ cd src/export && node export-nyse-results.js --preview # Preview NYSE data
 ## Features
 
 ### Core Capabilities
-- **Complete Coverage**: All possible tickers A-ZZZZ (475,254 combinations when fully enabled)
+- **Complete Coverage**: All possible tickers A-ZZZZZ (12.3 million combinations when fully enabled)
 - **Intelligent Rate Limiting**: Respects Yahoo Finance API limits with smart delays
 - **Resumable Processing**: Can stop and restart at any point
-- **Smart Caching**: Avoids reprocessing recently updated data
-- **Memory Efficient**: Streaming exports for large datasets (10GB heap allocation)
+- **Smart Caching**: Avoids reprocessing recently updated data (24-hour skip logic)
+- **Memory Efficient**: All scripts include 10GB heap allocation (`--max-old-space-size=10240`)
+- **Streaming Exports**: Handles large datasets without memory issues
+- **24-Hour Revalidation**: Skips recently checked tickers to optimize performance
 
 ### Data Collection
 - **Real-time Quotes**: Current prices, market cap, P/E ratios

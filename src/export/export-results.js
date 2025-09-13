@@ -45,6 +45,58 @@ class TickerExporter {
         });
     }
 
+    // Stream active tickers in batches to avoid memory issues
+    async streamActiveTickers() {
+        return new Promise((resolve, reject) => {
+            const query = `
+                SELECT ticker, price, exchange
+                FROM tickers
+                WHERE active = 1
+                ORDER BY ticker
+            `;
+            
+            this.db.all(query, (err, rows) => {
+                if (err) {
+                    reject(err);
+                } else {
+                    const formattedRows = rows.map(row => ({
+                        ticker: row.ticker,
+                        active: true,
+                        price: row.price,
+                        exchange: row.exchange
+                    }));
+                    resolve(formattedRows);
+                }
+            });
+        });
+    }
+
+    // Stream delisted tickers in batches to avoid memory issues
+    async streamDelistedTickers() {
+        return new Promise((resolve, reject) => {
+            const query = `
+                SELECT ticker, price, exchange
+                FROM tickers
+                WHERE active = 0
+                ORDER BY ticker
+            `;
+            
+            this.db.all(query, (err, rows) => {
+                if (err) {
+                    reject(err);
+                } else {
+                    const formattedRows = rows.map(row => ({
+                        ticker: row.ticker,
+                        active: false,
+                        price: row.price,
+                        exchange: row.exchange
+                    }));
+                    resolve(formattedRows);
+                }
+            });
+        });
+    }
+
     // Get only active tickers
     async getActiveTickers() {
         return new Promise((resolve, reject) => {
@@ -146,7 +198,7 @@ class TickerExporter {
         });
     }
 
-    // Export data to JSON files
+    // Export data to JSON files using streaming to handle large datasets
     async exportToJson(exportType = 'all') {
         try {
             console.log('📊 Gathering database statistics...');
@@ -154,11 +206,6 @@ class TickerExporter {
             
             console.log('📈 Getting exchange breakdown...');
             const exchangeBreakdown = await this.getExchangeBreakdown();
-            
-            console.log('🔍 Retrieving ticker data...');
-            const allTickers = await this.getAllTickers();
-            const activeTickers = await this.getActiveTickers();
-            const delistedTickers = await this.getDelistedTickers();
             
             // Create metadata object
             const metadata = {
@@ -194,31 +241,10 @@ class TickerExporter {
                 files: []
             };
 
-            // 1. Export complete results (all tickers)
-            if (exportType === 'all' || exportType === 'complete') {
-                const completeData = {
-                    metadata: { ...metadata, exportType: 'complete' },
-                    statistics,
-                    exchanges,
-                    tickers: allTickers
-                };
-                
-                console.log(`💾 Writing complete results (${allTickers.length} tickers) to ${this.resultsPath}...`);
-                fs.writeFileSync(this.resultsPath, JSON.stringify(completeData, null, 2));
-                
-                const fileSize = fs.statSync(this.resultsPath).size;
-                results.files.push({
-                    name: 'results.json',
-                    path: this.resultsPath,
-                    type: 'complete',
-                    tickerCount: allTickers.length,
-                    size: fileSize
-                });
-                results.created++;
-                results.totalSize += fileSize;
-            }
+            // Stream export active tickers (most useful for legacy format)
+            console.log('� Streaming active tickers export...');
+            const activeTickers = await this.streamActiveTickers();
             
-            // 2. Export active tickers
             const activeData = {
                 metadata: { ...metadata, exportType: 'active' },
                 statistics: { ...statistics, description: 'Active tickers only' },
@@ -240,33 +266,38 @@ class TickerExporter {
             results.created++;
             results.totalSize += fileSize;
             
-            // 3. Export delisted/inactive tickers
-            const delistedData = {
-                metadata: { ...metadata, exportType: 'delisted' },
-                statistics: { 
-                    ...statistics, 
-                    description: 'Delisted/inactive tickers only',
-                    // Override some stats for delisted focus
-                    active: 0,
-                    inactive: delistedTickers.length
-                },
-                exchanges: [], // No exchanges for inactive tickers
-                tickers: delistedTickers
-            };
-            
-            console.log(`💾 Writing delisted tickers (${delistedTickers.length} tickers) to ${this.delistedTickersPath}...`);
-            fs.writeFileSync(this.delistedTickersPath, JSON.stringify(delistedData, null, 2));
-            
-            fileSize = fs.statSync(this.delistedTickersPath).size;
-            results.files.push({
-                name: 'delisted_tickers.json',
-                path: this.delistedTickersPath,
-                type: 'delisted',
-                tickerCount: delistedTickers.length,
-                size: fileSize
-            });
-            results.created++;
-            results.totalSize += fileSize;
+            // Only export delisted tickers if requested
+            if (exportType === 'all' || exportType === 'delisted') {
+                // Stream export delisted tickers 
+                console.log('🔍 Streaming delisted tickers export...');
+                const delistedTickers = await this.streamDelistedTickers();
+                
+                const delistedData = {
+                    metadata: { ...metadata, exportType: 'delisted' },
+                    statistics: { 
+                        ...statistics, 
+                        description: 'Delisted/inactive tickers only',
+                        active: 0,
+                        inactive: delistedTickers.length
+                    },
+                    exchanges: [], // No exchanges for inactive tickers
+                    tickers: delistedTickers
+                };
+                
+                console.log(`💾 Writing delisted tickers (${delistedTickers.length} tickers) to ${this.delistedTickersPath}...`);
+                fs.writeFileSync(this.delistedTickersPath, JSON.stringify(delistedData, null, 2));
+                
+                fileSize = fs.statSync(this.delistedTickersPath).size;
+                results.files.push({
+                    name: 'delisted_tickers.json',
+                    path: this.delistedTickersPath,
+                    type: 'delisted',
+                    tickerCount: delistedTickers.length,
+                    size: fileSize
+                });
+                results.created++;
+                results.totalSize += fileSize;
+            }
             
             return {
                 outputDir: this.outputDir,

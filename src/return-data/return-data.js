@@ -200,7 +200,7 @@ async function getTickerData(symbol) {
         // Get comprehensive ticker data with error suppression
         const quote = await yahooFinance.quote(symbol, {}, { validateResult: false });
         const historicalData = await yahooFinance.historical(symbol, {
-            period1: '2025-01-01',
+            period1: '1900-01-01',
             period2: new Date().toISOString().split('T')[0],
             interval: '1d'
         }, { validateResult: false });
@@ -223,7 +223,7 @@ async function getTickerData(symbol) {
                 version: '2.0.0',
                 hadValidationWarnings: hadValidationWarnings,
                 historicalPeriod: {
-                    start: '2025-01-01',
+                    start: '1900-01-01',
                     end: new Date().toISOString().split('T')[0]
                 },
                 recordCount: {
@@ -309,10 +309,22 @@ async function saveTickerDataToDB(symbol, database) {
             };
         }
         
-        // Save to database (only clean data without validation issues)
-        await database.insertOrUpdateTicker(symbol, data);
+        // Check if we got valid data (quote, historical, or summary should contain actual data)
+        const hasValidData = data.quote || (data.historical && data.historical.length > 0) || data.summary;
         
-        return { symbol, success: !data.metadata.error, data };
+        if (!hasValidData && data.metadata.error) {
+            // Data fetch failed - don't update timestamp, just return error
+            return { symbol, success: false, error: data.metadata.error };
+        }
+        
+        // Only save to database and update timestamp if we have valid data
+        if (hasValidData) {
+            await database.insertOrUpdateTicker(symbol, data);
+            return { symbol, success: true, data };
+        } else {
+            // No valid data but no explicit error - treat as temporary failure
+            return { symbol, success: false, error: 'No valid data returned - undefined response' };
+        }
         
     } catch (error) {
         return { symbol, success: false, error: error.message };
@@ -377,13 +389,13 @@ async function processAllActiveTickers() {
         const startTime = Date.now();
         
         // Process tickers in batches of 500
-        const batchSize = 500;
+        const batchSize = 100;
         
         // Force refresh cookies/crumbs every 10,000 requests
         const refreshInterval = 10000;
         
         // Enable concurrent processing (similar to validate script)
-        const concurrentRequests = 25; // Conservative for comprehensive data
+        const concurrentRequests = 1; // Conservative for comprehensive data
         
         // Function to force refresh cookies/crumbs
         async function refreshSession() {
@@ -459,7 +471,12 @@ async function processAllActiveTickers() {
                                     console.log(`   🔄 ${symbol}: Marked inactive (schema error)`);
                                 } else {
                                     errors.push({ symbol, error: result.error || 'Unknown error' });
-                                    console.log(`   ❌ ${symbol}: ${result.error}`);
+                                    // Different message for undefined vs other errors
+                                    if (result.error && result.error.includes('undefined response')) {
+                                        console.log(`   ⏸️  ${symbol}: No data returned (timestamp not updated)`);
+                                    } else {
+                                        console.log(`   ❌ ${symbol}: ${result.error}`);
+                                    }
                                 }
                                 return { symbol, success: false };
                             }

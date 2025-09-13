@@ -276,12 +276,43 @@ async function main() {
         
         const startTime = Date.now();
         let lastProgressTime = startTime;
+        let requestCount = 0; // Track total requests for refresh timing
+        
+        // Force refresh cookies/crumbs every 10,000 requests
+        const refreshInterval = 10000;
+        
+        // Function to force refresh cookies/crumbs (similar to return-data script)
+        async function refreshSession() {
+            try {
+                console.log('🔄 Refreshing cookies and crumbs for rate limit prevention...');
+                // Force a simple request to refresh session
+                const refreshUrl = 'https://query1.finance.yahoo.com/v8/finance/chart/AAPL';
+                await axios.get(refreshUrl, {
+                    timeout: 5000,
+                    headers: {
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                    }
+                });
+                console.log('✅ Session refreshed successfully');
+                await new Promise(resolve => setTimeout(resolve, 2000)); // 2 second pause after refresh
+            } catch (error) {
+                console.log('⚠️  Session refresh warning (continuing anyway):', error.message);
+            }
+        }
         
         for (let i = 0; i < tickersToValidate.length; i += validator.batchSize) {
             const batch = tickersToValidate.slice(i, i + validator.batchSize);
             const batchStartTime = Date.now();
             
+            // Check if we need to refresh session before this batch
+            if (requestCount > 0 && requestCount % refreshInterval === 0) {
+                await refreshSession();
+            }
+            
             const batchResults = await validator.processBatchFast(batch);
+            
+            // Update request count (approximate based on batch size and concurrent requests)
+            requestCount += batch.length;
             
             // Accumulate results
             totalResults.validated += batchResults.validated;
@@ -320,6 +351,14 @@ async function main() {
         console.log(`✅ Found active: ${totalResults.active}`);
         console.log(`❌ Inactive: ${totalResults.inactive}`);
         console.log(`⚠️  Errors: ${totalResults.errors}`);
+        console.log(`🌐 Total API requests: ${requestCount}`);
+        
+        // Show refresh statistics
+        const refreshCount = Math.floor(requestCount / refreshInterval);
+        if (refreshCount > 0) {
+            console.log(`🔄 Session refreshes performed: ${refreshCount} (every ${refreshInterval.toLocaleString()} requests)`);
+        }
+        
         console.log(`\n📈 Final Database Stats:`);
         console.log(`   Total: ${finalStats.total}`);
         console.log(`   Active: ${finalStats.active_count}`);

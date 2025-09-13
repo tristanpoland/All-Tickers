@@ -4,13 +4,17 @@
   "description": "Bulk ticker generation and validation system with SQLite database",
   "main": "index.js",
   "scripts": {
-    "start": "./index.sh",
-    "generate": "cd src && node generate-tickers.js",
-    "validate": "cd src && node validate-tickers.js",
-    "export": "cd src && node export-results.js",
-    "export:active": "cd src && node export-results.js --active-only",
-    "export:preview": "cd src && node export-results.js --preview",
-    "test:validate": "cd src && node validate-tickers.js --limit 100 --dry-run"
+    "pipeline": "./scripts/pipeline.sh",
+    "generate": "./scripts/generate.sh",
+    "validate": "./scripts/validate.sh",
+    "revalidate-active": "./scripts/revalidate-active.sh",
+    "revalidate-inactive": "./scripts/revalidate-inactive.sh",
+    "gather": "./scripts/gather.sh",
+    "export": "./scripts/export.sh",
+    "export-legacy": "./scripts/export-legacy.sh",
+    "export-nyse": "./scripts/export-nyse.sh",
+    "test-validate": "./scripts/test-validate.sh",
+    "test": "./scripts/test-validate.sh"
   },
   "dependencies": {
     "sqlite3": "^5.1.6",
