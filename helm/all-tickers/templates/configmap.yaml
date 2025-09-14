@@ -12,7 +12,7 @@ metadata:
     field.cattle.io/projectId: {{ .Values.rancher.project }}
     {{- end }}
 data:
-  {{- range $key, $value := .Values.configMap.data }}
+{{- range $key, $value := .Values.configMap.data }}
   {{ $key }}: {{ $value | quote }}
-  {{- end }}
+{{- end }}
 {{- end }}
