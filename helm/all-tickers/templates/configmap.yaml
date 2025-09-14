@@ -12,8 +12,8 @@ metadata:
     field.cattle.io/projectId: {{ .Values.rancher.project }}
     {{- end }}
 data:
-  pipeline-enabled: {{ .Values.configMap.data."pipeline.enabled" | quote }}
-  generate-enabled: {{ .Values.configMap.data."generate.enabled" | quote }}
-  validate-enabled: {{ .Values.configMap.data."validate.enabled" | quote }}
-  export-format: {{ .Values.configMap.data."export.format" | quote }}
+  pipeline-enabled: {{ index .Values.configMap.data "pipeline.enabled" | quote }}
+  generate-enabled: {{ index .Values.configMap.data "generate.enabled" | quote }}
+  validate-enabled: {{ index .Values.configMap.data "validate.enabled" | quote }}
+  export-format: {{ index .Values.configMap.data "export.format" | quote }}
 {{- end }}
